@@ -1,0 +1,372 @@
+:root {
+  --color-grey: #88888B;
+  --color-grey-2: #37312C;
+
+  --gradient-grey: linear-gradient(180deg, #2C292E 0%, #191A1E 100%);
+  --gradient-yellow: radial-gradient(53.09% 82.83% at 50% 49.99%, rgba(174, 158, 69, 0) 20%, rgba(31, 32, 33, 0.3) 100%);
+  --gradient-green: radial-gradient(53.09% 82.83% at 50% 50%, rgba(61, 102, 82, 0) 20%, rgba(31, 32, 33, 0.3) 100%);
+  --gradient-red: radial-gradient(53.09% 82.83% at 50% 50%, rgba(97, 48, 50, 0) 20%, rgba(31, 32, 33, 0.3) 100%);
+  --gradient-yellow-text: linear-gradient(180deg, #FFC701 0%, #E04F21 100%);
+  --gradient-green-light: linear-gradient(180deg, #35E03B 0%, #288F18 100%);
+  --gradient-red-light: linear-gradient(180deg, #FD3A3A 0%, #A61930 100%);  
+
+  --breakpoint-tablet: 930px; 
+  --text-shadow: 
+}
+
+@font-face {
+  font-family: "Gilroy";
+  src: url(../fonts/Gilroy-Bold.woff) format("woff"),
+    url(../fonts/Gilroy-Bold.otf) format("opentype"),
+    url(../fonts/Gilroy-Bold.ttf) format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Gilroy";
+  src: url(../fonts/Gilroy-Medium.woff) format("woff"),
+    url(../fonts/Gilroy-Medium.otf) format("opentype"),
+    url(../fonts/Gilroy-Medium.ttf) format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Gilroy-normal";
+  src: url(../fonts/Gilroy-Regular.woff) format("woff"),
+    url(../fonts/Gilroy-Regular.otf) format("opentype"),
+    url(../fonts/Gilroy-Regular.ttf) format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Reaver";
+  src: url(../fonts/Reaver-Bold.woff) format("woff"),
+    url(../fonts/Reaver-Bold.eot) format("embedded-opentype"),
+    url(../fonts/Reaver-Bold.ttf) format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+
+*,
+*::after,
+*::before {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  height: 5px;
+  width: 5px;
+  display: none;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 17px;
+  display: none;
+}
+
+::-webkit-scrollbar-track {
+  background-color: #E9BEEA;
+  display: none;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+::selection {
+  color: #fff;
+  background-color: #6d6b8d;
+}
+
+:root {
+  --app-height: 100vh;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s linear;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+html,
+body,
+.app,
+.layout {
+  padding: 0;
+  margin: 0;
+  color: white;
+  background: url('../img/texture.png'),linear-gradient(180deg, #2C292E 30%, #191A1E 100%);  
+  font-family: Gilroy;
+  font-size: 1.6rem;
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1.2;
+  
+  /* overflow-x: hidden; */
+  position: relative;
+  min-height: 100vh;
+  /* width: calc(100vh * 4); */
+}
+
+body {
+  /* scroll-behavior: smooth; */
+}
+
+ul {
+  list-style: none;
+}
+
+a,
+button {
+  outline: none;
+  border: none;
+  background-color: transparent;
+  text-decoration: none;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+
+  font-size: 16px;
+  transition: all .3s;
+  display: inline-block;
+}
+
+@media only screen and (min-width: 850px) {
+  a,
+  button {
+    font-size: 1.4rem;
+  }
+}
+
+/* @media only screen and (max-width: 850px) {
+  a,
+  button {
+    font-size: 2rem;
+  }
+} */
+
+input,
+textarea {
+  outline: none;
+  border: none;
+  background-color: transparent;
+  font-family: inherit;
+  color: inherit;
+
+  font-size: 1.6rem;
+}
+
+@media only screen and (max-width: 850px) {
+  input,
+  textarea {
+    font-size: 13px;
+  }
+}
+
+textarea {
+  resize: none;
+  overflow: hidden;
+}
+
+img,
+picture,
+source,
+video,
+svg {
+  pointer-events: none !important;
+  -webkit-user-drag: none !important;
+  -moz-user-select: none !important;
+  -webkit-user-select: none !important;
+  -ms-user-select: none !important;
+  user-select: none !important;
+}
+
+html {
+  font-size: 10px;
+  overflow-y: scroll;
+}
+
+.base-button {
+  width: 100%;
+  padding: 7px 0;
+  text-shadow: 0px 2px 4px rgba(6, 13, 46, 0.5);
+  border-width: 1px;
+  border-style: solid;
+}
+
+.button-yellow {
+  background: var(--gradient-yellow);
+  background-color: #AE9E45;
+  border-color: #D6BF4C #1f202199 #1f202199 #D6BF4C;
+}
+
+.button-green {
+  background: var(--gradient-yellow);
+  background-color: #3D6652;
+  border-color: #39724f80 #1f202199 #1f202199 #39724f80;
+}
+.button-red {
+  background: var(--gradient-red);
+  background-color: #72322d;
+  border-color: #72322d #1f202199;
+}
+
+
+
+@media only screen and (min-width: 450px) {
+  html {
+    font-size: 10.4px;
+  }
+}
+
+@media only screen and (min-width: 700px) {
+  html {
+    font-size: 11px;
+  }
+}
+
+@media only screen and (min-width: 680px) and (min-height: 800px) {
+  html {
+    font-size: 11.4px;
+  }
+}
+
+@media only screen and (min-width: 850px) {
+  html {
+    font-size: 13px;
+  }
+}
+
+@media only screen and (min-width: 1900px) {
+  html {
+    font-size: 15px;
+  }
+}
+
+/* @media only screen and (min-width: 700px) {
+  html {
+    font-size: 7.04px;
+  }
+}
+
+@media only screen and (min-width: 800px) {
+  html {
+    font-size: 7.36px;
+  }
+} */
+/* 
+@media only screen and (min-width: 900px) {
+  html {
+    font-size: 7.68px;
+  }
+}
+
+@media only screen and (min-width: 1100px) {
+  html {
+    font-size: 8.04px;
+  }
+}
+
+@media only screen and (min-width: 1200px) {
+  html {
+    font-size: 8.36px;
+  }
+}
+
+@media only screen and (min-width: 1300px) {
+  html {
+    font-size: 8.96px;
+  }
+}
+
+@media only screen and (min-width: 1600px) {
+  html {
+    font-size: 11.68px;
+  }
+} */
+
+/* @media only screen and (max-width: 1300px) {
+  html {
+    font-size: 8.96px;
+  }
+}
+
+@media only screen and (max-width: 1200px) {
+  html {
+    font-size: 8.36px;
+  }
+}
+
+@media only screen and (max-width: 1100px) {
+  html {
+    font-size: 8.04px;
+  }
+}
+
+@media only screen and (max-width: 900px) {
+  html {
+    font-size: 7.68px;
+  }
+}
+
+@media only screen and (max-width: 800px) {
+  html {
+    font-size: 7.36px;
+  }
+}
+
+@media only screen and (max-width: 700px) {
+  html {
+    font-size: 7.04px;
+  }
+}
+
+@media only screen and (max-width: 680px) and (min-height: 800px) {
+  html {
+    font-size: 8px;
+  }
+}
+
+@media only screen and (max-width: 600px) {
+  html {
+    font-size: 7.5px;
+  }
+}
+
+@media only screen and (max-width: 450px) {
+  html {
+    font-size: 7.1px;
+  }
+}
+
+@media only screen and (max-width: 350px) {
+  html {
+    font-size: 6.56px;
+  }
+}
+
+@media only screen and (max-width: 1000px) and (max-height: 520px) {
+  html {
+    font-size: 7px;
+  }
+}
+
+@media only screen and (min-width: 1600px) {
+  html {
+    font-size: 11.68px;
+  }
+} */

@@ -1,0 +1,7 @@
+stages:
+  - build
+  - deploy
+
+include:
+  - local: .gitlab/ci/prod.yml
+  # - local: .gitlab/ci/stage.yml
