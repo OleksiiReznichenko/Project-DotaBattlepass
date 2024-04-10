@@ -1,0 +1,30 @@
+<svg width="816" height="6" viewBox="0 0 816 6" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M816 0H0V6H816V0Z" fill="url(#paint0_linear_25_22219)"/>
+<path opacity="0.02" d="M816 2.85001H0V5.78H816V2.85001Z" fill="#18191D"/>
+<path opacity="0.05" d="M816 2.71001H0V5.57001H816V2.71001Z" fill="#18191C"/>
+<path opacity="0.07" d="M816 2.57001H0V5.36H816V2.57001Z" fill="#17181B"/>
+<path opacity="0.1" d="M816 2.43001H0V5.14H816V2.43001Z" fill="#17171B"/>
+<path opacity="0.12" d="M816 2.28H0V4.92H816V2.28Z" fill="#16171A"/>
+<path opacity="0.14" d="M816 2.14H0V4.71001H816V2.14Z" fill="#151619"/>
+<path opacity="0.17" d="M816 2H0V4.5H816V2Z" fill="#151518"/>
+<path opacity="0.19" d="M816 1.85001H0V4.28H816V1.85001Z" fill="#141517"/>
+<path opacity="0.21" d="M816 1.71001H0V4.07001H816V1.71001Z" fill="#131416"/>
+<path opacity="0.24" d="M816 1.57001H0V3.86H816V1.57001Z" fill="#131315"/>
+<path opacity="0.26" d="M816 1.43001H0V3.64H816V1.43001Z" fill="#121315"/>
+<path opacity="0.29" d="M816 1.28H0V3.42H816V1.28Z" fill="#121214"/>
+<path opacity="0.31" d="M816 1.14H0V3.21001H816V1.14Z" fill="#111113"/>
+<path opacity="0.33" d="M816 1H0V3H816V1Z" fill="#101112"/>
+<path opacity="0.36" d="M816 0.850006H0V2.78H816V0.850006Z" fill="#101011"/>
+<path opacity="0.38" d="M816 0.710007H0V2.57001H816V0.710007Z" fill="#0F0F10"/>
+<path opacity="0.4" d="M816 0.570007H0V2.36H816V0.570007Z" fill="#0E0F0F"/>
+<path opacity="0.43" d="M816 0.430008H0V2.14H816V0.430008Z" fill="#0E0E0F"/>
+<path opacity="0.45" d="M816 0.279999H0V1.92H816V0.279999Z" fill="#0D0D0E"/>
+<path opacity="0.48" d="M816 0.139999H0V1.71001H816V0.139999Z" fill="#0D0D0D"/>
+<path opacity="0.5" d="M816 0H0V1.5H816V0Z" fill="#0C0C0C"/>
+<defs>
+<linearGradient id="paint0_linear_25_22219" x1="408" y1="8.86" x2="408" y2="-2.38" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2C292E"/>
+<stop offset="1" stop-color="#191A1E"/>
+</linearGradient>
+</defs>
+</svg>
