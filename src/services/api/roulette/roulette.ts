@@ -1,13 +1,14 @@
 import { httpService } from '@/services/http/http.service';
 import type { Roulette } from './models';
-import { BetboomIntegrate } from '@mymap/betboom-integrate';
+// import { BetboomIntegrate } from '@mymap/betboom-integrate';
 import { useAuthStore } from '@/stores/auth';
 import { storeToRefs } from 'pinia';
 
 const spaceId = import.meta.env.VITE_SPACE_ID;
-const betboomIntegrate = new BetboomIntegrate({
-  betboomAuthServiceUrl: import.meta.env.VITE_BB_SERVICE_URL,
-});
+// const betboomIntegrate = new BetboomIntegrate({
+//   betboomAuthServiceUrl: import.meta.env.VITE_BB_SERVICE_URL,
+// });
+const betboomIntegrate = {};
 
 export const rouletteApiService = {
   getRoulettesList: async (): Promise<TypedResponse<Roulette>> => {
@@ -19,6 +20,7 @@ export const rouletteApiService = {
       token: { value: token },
     } = storeToRefs(authStore);
 
-    return await betboomIntegrate.playBattlepassRoulette(token, id);
+    // return await betboomIntegrate.playBattlepassRoulette(token, id);
+    return await betboomIntegrate;
   },
 };
