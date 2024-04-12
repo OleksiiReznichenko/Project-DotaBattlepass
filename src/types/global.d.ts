@@ -1,4 +1,4 @@
-declare module '@mymap/betboom-integrate';
+// declare module '@mymap/betboom-integrate';
 
 declare interface TypedResponse<T=any> extends Response {
     data: any;

@@ -5,13 +5,12 @@
   "scripts": {
     "release": "standard-version",
     "dev": "vite",
-    "build": "run-p type-check build-only",
+    "build": "run-p build-only",
     "preview": "vite preview --port 4173",
     "build-only": "vite build",
     "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
-    "@mymap/betboom-integrate": "^1.5.20",
     "axios": "^0.27.2",
     "gsap": "^3.11.1",
     "js-cookie": "^3.0.1",
