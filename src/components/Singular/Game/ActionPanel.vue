@@ -9,9 +9,11 @@ import { useRouletteStore } from '@/stores/roulette';
 import { RouletteType } from '@/services/api/roulette';
 import { storeToRefs } from "pinia";
 import { computed } from 'vue';
-import { onMounted, reactive, ref, watchEffect } from '@vue/runtime-core';
+import { onUnmounted, reactive, ref, watchEffect } from 'vue';
 import Roulette from "@/components/Reusable/Game/Roulette.vue";
 import router from '@/router';
+import { DEMO_MODE } from '@/demo/config';
+import { demoAction, nextUnlockedEncounter } from '@/demo/progression';
 
 
 const isRouletteClicked = reactive({
@@ -21,7 +23,7 @@ const isRouletteClicked = reactive({
 })
 const baseStore = useBaseStore();
 const { 
-    updateProgressBarPositionIndicator, isRouletteWindowOpened, currentUserAction, 
+    activeEventLevel, completedEventLevels, updateProgressBarPositionIndicator, isRouletteWindowOpened, currentUserAction,
     rouletteGottenValue, goToNextEvent, myCharacterAction, allowToOpenRoulette,
     creepAnimationIndicator
 } = storeToRefs(baseStore);
@@ -56,8 +58,9 @@ const currentRouletteState = computed(() => {
     // if (currentUserAction.value === 'go') {
     //     return 0;
     // }
+    if (DEMO_MODE) return '∞';
     if (!isRegistered.value) {
-        return spinsAmount.value;
+        return Math.max(0, spinsAmount.value);
     }
     if (!roulettes.value || roulettes.value.length < 1) return 0;
     let spins = roulettes.value.find((item) => {
@@ -82,6 +85,7 @@ const currentRouletteState = computed(() => {
 })
 
 const spinsText = computed(() => {
+    if (DEMO_MODE) return 'Moves';
     if (spinsAmount.value === 1) {
         return 'Move';
     } else if (spinsAmount.value > 1 && spinsAmount.value < 5) {
@@ -94,9 +98,11 @@ const spinsText = computed(() => {
 })
 
 const openWindow = (): void => {
-    if (!allowToOpenRoulette.value) return;
+    if (!allowToOpenRoulette.value || isRouletteWindowOpened.value) return;
+    if (!DEMO_MODE && !isRegistered.value) {
+        spinsAmount.value = Math.max(0, spinsAmount.value - 1);
+    }
     isRouletteWindowOpened.value = true;
-    spinsAmount.value -= 1;
     myCharacterAction.value = 'idle';
     creepAnimationIndicator.value = false;
     allowToOpenRoulette.value = false;
@@ -184,7 +190,7 @@ watchEffect(() => {
 // })
 
 const attack = (): void => {
-    if (!allowToOpenRoulette.value) return;
+    if (!allowToOpenRoulette.value || isRouletteWindowOpened.value) return;
 
     // const spins = roulettes.value.find(el => {
     //     return el.name === RouletteType.FARM;
@@ -210,7 +216,7 @@ const attack = (): void => {
 };
 
 const farm = (): void => {
-    if (!allowToOpenRoulette.value) return;
+    if (!allowToOpenRoulette.value || isRouletteWindowOpened.value) return;
 
     // const spins = roulettes.value.find(el => {
     //     return el.name === RouletteType.FARM;
@@ -246,7 +252,7 @@ watchEffect(() => {
 })
 
 const getFreeSpins = (): void => {
-    if (!allowToOpenRoulette.value) return;
+    if (!allowToOpenRoulette.value || isRouletteWindowOpened.value) return;
 
     // const spins = roulettes.value.find(el => {
     //     return el.name === RouletteType.MINE;
@@ -267,7 +273,7 @@ const getFreeSpins = (): void => {
 };
 
 const getRunes = (): void => {
-    if (!allowToOpenRoulette.value) return;
+    if (!allowToOpenRoulette.value || isRouletteWindowOpened.value) return;
 
     // const spins = roulettes.value.find(el => {
     //     return el.name === RouletteType.RUNIC;
@@ -287,17 +293,54 @@ const getRunes = (): void => {
     }
 };
 
+// Events occur every few levels, not at every one of the 25 XP stages.
+// The old exact-level lookup caused Go to silently fail at intermediate levels.
+const isWalking = ref(false);
+let walkTimeout: ReturnType<typeof setTimeout> | null = null;
+let finishWalkTimeout: ReturnType<typeof setTimeout> | null = null;
 const go = (): void => {
-    if (user.value.points >= levels.value[levels.value.length - 1].points) return;
-    const currentEvent = fightEvents.value.find(el => {
-        return el.userLevel === user.value.level;
-    });
-    if (!currentEvent) return;
-    myCharacterAction.value = 'walk';
-    setTimeout(() => {
+    if (DEMO_MODE) {
+        if (currentUserAction.value !== 'go' || isRouletteWindowOpened.value ||
+            myCharacterAction.value === 'walk' || goToNextEvent.value) return;
+
+        const destination = nextUnlockedEncounter(
+            fightEvents.value, activeEventLevel.value, user.value.level
+        );
+        if (!destination) {
+            // Recover from a stale Go label instead of leaving a dead button.
+            currentUserAction.value = demoAction(
+                fightEvents.value, activeEventLevel.value, user.value.level,
+                completedEventLevels.value
+            );
+            return;
+        }
+
+        // Let Index.vue own the movement and arrival. No second demo timer.
+        myCharacterAction.value = 'walk';
         goToNextEvent.value = true;
+        return;
+    }
+
+    if (isWalking.value || isRouletteWindowOpened.value ||
+        user.value.points >= levels.value[levels.value.length - 1].points) return;
+    const destination = fightEvents.value.find(event => event.userLevel === user.value.level);
+    if (!destination) return;
+    isWalking.value = true;
+    myCharacterAction.value = 'walk';
+    walkTimeout = setTimeout(() => {
+        goToNextEvent.value = true;
+        walkTimeout = null;
+        finishWalkTimeout = setTimeout(() => {
+            isWalking.value = false;
+            finishWalkTimeout = null;
+        }, 2700);
     }, 800);
 };
+
+onUnmounted(() => {
+    if (walkTimeout) clearTimeout(walkTimeout);
+    if (finishWalkTimeout) clearTimeout(finishWalkTimeout);
+});
 </script>
 
 <template>

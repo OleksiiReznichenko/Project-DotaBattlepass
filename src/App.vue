@@ -11,6 +11,8 @@ import AppNav from '@/components/Reusable/App/Nav.vue';
 import PreviewScreen from '@/components/Singular/Game/PreviewScreen.vue';
 import { useRouletteStore } from '@/stores/roulette';
 import { authBetBoom } from './services/http/http.helper';
+import { DEMO_MODE } from './demo/config';
+import { RouterLink } from 'vue-router';
 
 // IF TOUCHPAD DEVICE'S HEIGHT CHANGES - CHANGE BASE 100VH HEIGHT
 const appHeight = (): void => {
@@ -49,34 +51,27 @@ const { isRegistered, token } = storeToRefs(authStore);
 let isLastLevelIndicator = ref<boolean>(false);
 
 watchEffect(() => {
-  if (levels.value.length < 1) return;
-  if (isRegistered.value) {
-    if (user.value.level === levels.value[levels.value.length - 1].levelId) {
-      allLevelsFinishedIndicator.value = true;
-    }
-  } else {
-    const currentLevel = levels.value.find((el, i, arr) => {
+  if (levels.value.length === 0) return;
 
-    if (i + 1 === arr.length) {
-      isLastLevelIndicator.value = true;
-      return el.points;
-    }
-    if (el.points === 0 && user.value.points < arr[i + 1].points) {
-      return el;
-    }
-    return user.value.points - arr[i + 1].points < 0
-    })
-
-    // if (isLastLevelIndicator.value && user.value.points >= currentLevel!.points) {
-    //   allLevelsFinishedIndicator.value = true;
-    // }
-
-    if (currentLevel || currentLevel === 0) {
-    user.value.level = currentLevel.levelId;
-    } else {
-    user.value.level = 1;
-    }
+  const lastLevel = levels.value[levels.value.length - 1];
+  if (DEMO_MODE) {
+    // Demo progression is entirely local. No account is created.
+    const reachedLevel = levels.value.reduce((result, level) =>
+      user.value.points >= level.points ? level.levelId : result, 1);
+    user.value.level = reachedLevel;
+    isLastLevelIndicator.value = reachedLevel === lastLevel.levelId;
+    allLevelsFinishedIndicator.value = isLastLevelIndicator.value;
+    return;
   }
+
+  if (isRegistered.value) {
+    allLevelsFinishedIndicator.value = user.value.level >= lastLevel.levelId;
+    return;
+  }
+
+  const reachedLevel = levels.value.reduce((result, level) =>
+    user.value.points >= level.points ? level.levelId : result, 1);
+  user.value.level = reachedLevel;
 });
 
 // let isUpdated = ref(false);
@@ -114,10 +109,14 @@ watchEffect(() => {
 // })
 
 watchEffect(() => {
-  if (isRegistered.value) {
+  if (DEMO_MODE) {
+    // All original regions and events are visible, without using remote APIs.
+    levelsStore.setStaticLevels();
+    eventsStore.setEvents(true);
+  } else if (isRegistered.value) {
     levelsStore.getLevels();
     eventsStore.setEvents(true);
-  } else  {
+  } else {
     levelsStore.setStaticLevels();
     eventsStore.setEvents(false);
   }
@@ -198,7 +197,7 @@ onMounted(() => {
   html.value = document.querySelector('html');
   appHeight();
 
-  authBetBoom();
+  if (!DEMO_MODE) authBetBoom();
   
   // userStore.getUser();
   // userStore.getUserInfo();
@@ -212,32 +211,38 @@ onMounted(() => {
   // ADD WINDOW EVENT LISTENER
   window.addEventListener('resize', onResize);
 
-  let googleLetManagerScript = document.createElement('script');
-  googleLetManagerScript.setAttribute('src', 'https://www.googletagmanager.com/gtag/js?id=G-3FGF7CGPH2');
-  googleLetManagerScript.async = true;
+  if (!DEMO_MODE) {
+    // Only restore the original embed integration for private, compatible deployments.
+    window.addEventListener('message', receiveMessage);
+  }
+});
 
-  let gtagScript = document.createElement('script');
-  gtagScript.innerHTML = "window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-3FGF7CGPH2');";
-  document.head.appendChild(googleLetManagerScript);
-  document.head.appendChild(gtagScript);
+function receiveMessage(event: MessageEvent): void {
+  // The old public demo never accepts messages from external windows.
+  if (DEMO_MODE || !import.meta.env.VITE_PARENT_ORIGIN || event.origin !== import.meta.env.VITE_PARENT_ORIGIN) return;
+  if (event.data?.type === 'betboom_user_logout') {
+    token.value = null;
+    isRegistered.value = false;
+  }
+}
 
+const showDemoNotice = ref<boolean>(true);
 
-  window.addEventListener("message", receiveMessage, false);
+const closeDemoNotice = (): void => {
+  showDemoNotice.value = false;
+  sessionStorage.setItem('dota-demo-notice-closed', 'true');
+};
 
-    function receiveMessage(event: any)
-    {
-        if(event.data.type === 'betboom_user_logout') {
-          console.log('[x] logouting...')
-          token.value = null;
-          isRegistered.value = false;
-          window.location.reload();
-        }
-    }
-})
+onMounted(() => {
+  if (DEMO_MODE) {
+    showDemoNotice.value = sessionStorage.getItem('dota-demo-notice-closed') !== 'true';
+  }
+});
 
 onUnmounted(() => {
   // REMOVE WINDOW EVENT LISTENER
   window.removeEventListener('resize', onResize);
+  if (!DEMO_MODE) window.removeEventListener('message', receiveMessage);
 })
 </script>
 
@@ -247,8 +252,13 @@ onUnmounted(() => {
       <component :is="Component" />
     </Transition>
   </router-view>
-  <PreviewScreen />
+  <PreviewScreen v-if="route.name === 'game'" />
   <AppNav />
+  <aside v-if="DEMO_MODE && showDemoNotice" class="demo-notice" role="note">
+    <p>Archived frontend demo. Game data is local; no accounts, prizes, or betting.</p>
+    <RouterLink to="/about">About this demo →</RouterLink>
+    <button type="button" class="demo-notice__close" aria-label="Close demo notice" @click="closeDemoNotice">×</button>
+  </aside>
 </template>
 
 <style lang="scss">
@@ -344,5 +354,50 @@ canvas {
     100% {
         transform: translate(-50%, -50%) rotate(0);
     }
+}
+
+.demo-notice {
+  position: fixed;
+  top: 1.5rem;
+  right: 1.5rem;
+  z-index: 100001;
+  width: min(34rem, calc(100vw - 3rem));
+  padding: 1.3rem 4rem 1.3rem 1.6rem;
+  border: .1rem solid rgba(75, 215, 85, .35);
+  border-radius: .8rem;
+  background: rgba(24, 25, 29, .96);
+  box-shadow: 0 .8rem 2.8rem rgba(0, 0, 0, .35);
+  color: #ddd;
+  font-family: 'Gilroy', sans-serif;
+  font-size: 1.3rem;
+  line-height: 1.5;
+
+  p { margin-bottom: .6rem; }
+  a { color: #51e65b; font-weight: 700; }
+  a:hover { text-decoration: underline; }
+
+  &__close {
+    position: absolute;
+    top: .8rem;
+    right: .8rem;
+    display: grid;
+    width: 2.8rem;
+    height: 2.8rem;
+    place-items: center;
+    color: #d6d6d6;
+    font-size: 2.4rem;
+    cursor: pointer;
+    border-radius: .4rem;
+    &:hover { background: rgba(255, 255, 255, .1); }
+    &:focus-visible { outline: .2rem solid #51e65b; outline-offset: .2rem; }
+  }
+
+  @media only screen and (max-width: 850px) {
+    top: 1rem;
+    left: 1rem;
+    right: auto;
+    width: min(29rem, calc(100vw - 2rem));
+    font-size: 1.2rem;
+  }
 }
 </style>

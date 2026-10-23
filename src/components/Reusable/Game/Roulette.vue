@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref, watchEffect } from 'vue';
+import { DEMO_MODE } from '@/demo/config';
+import { onMounted, ref, watch, watchEffect } from 'vue';
 import { storeToRefs } from "pinia";
-import { gsap, Power2 } from 'gsap';
 import { useBaseStore } from '@/stores/index';
 import { useAuthStore } from '@/stores/auth';
 import { useRouletteStore } from '@/stores/roulette';
@@ -25,7 +25,53 @@ const rouletteContainer = ref<null | HTMLElement>(null);
 
 // const gsapAnim1 = ref<any>(null);
 // const gsapAnim2 = ref<any>(null);
-watchEffect(() => {
+// The public demo owns the wheel transform explicitly. Changing a running
+// 4-second transition to a shorter one did not reliably stop the old spin.
+watch(
+    [roulette, isRouletteWindowOpened, skipScrollIndicator,
+        () => rouletteGottenValue.value.neededRotation],
+    ([element, opened, skipped, rotation], _previous, onCleanup) => {
+        if (!DEMO_MODE || !element ||
+            rouletteContainer.value?.classList.contains('button-background')) return;
+
+        let frame: number | null = null;
+        onCleanup(() => {
+            if (frame !== null) cancelAnimationFrame(frame);
+        });
+
+        if (!opened) {
+            element.style.transition = 'none';
+            element.style.transform = 'rotate(0deg)';
+            return;
+        }
+        if (rotation === null) return;
+
+        if (skipped) {
+            // Immediately land on the selected segment before revealing XP.
+            element.style.transition = 'none';
+            element.style.transform = `rotate(${rotation}deg)`;
+            return;
+        }
+
+        element.style.transition = 'none';
+        element.style.transform = 'rotate(0deg)';
+        // Force the starting angle into layout before animating the result.
+        void element.offsetWidth;
+        frame = requestAnimationFrame(() => {
+            if (!isRouletteWindowOpened.value || skipScrollIndicator.value) return;
+            element.style.transition = 'transform 3.8s cubic-bezier(.14, .62, .22, 1)';
+            element.style.transform = `rotate(${rotation}deg)`;
+        });
+    },
+    { immediate: true, flush: 'post' }
+);
+
+watchEffect((onCleanup) => {
+    if (DEMO_MODE) return;
+    let animationTimer: ReturnType<typeof setTimeout> | null = null;
+    onCleanup(() => {
+        if (animationTimer) clearTimeout(animationTimer);
+    });
 
     if (!roulette.value || rouletteContainer.value?.classList.contains('button-background')) return;
     if (isRegistered.value && !winId.value && !skipScrollIndicator.value) {
@@ -34,28 +80,28 @@ watchEffect(() => {
     }
     
     if (skipScrollIndicator.value) {
-        // setTimeout(() => {
-            roulette.value!.style.transition = `none`;
-        // }, 200);
+        roulette.value.style.transition = 'none';
         return;
     }
     if (!isRouletteWindowOpened.value) {
-        setTimeout(() => {
-            roulette.value!.style.transition = `none`;
-            roulette.value!.style.transform = `rotate(0deg)`;
+        animationTimer = setTimeout(() => {
+            if (!roulette.value) return;
+            roulette.value.style.transition = `none`;
+            roulette.value.style.transform = `rotate(0deg)`;
         }, 200);
         return;
     }
-    if (isRouletteWindowOpened.value && winId || !isRegistered) {
-        setTimeout(() => {
-            roulette.value!.style.transition = `all 4s ease-out`;
-            roulette.value!.style.transform = `rotate(${rouletteGottenValue.value.neededRotation}deg)`;
+    if (isRouletteWindowOpened.value && (winId.value || !isRegistered.value)) {
+        animationTimer = setTimeout(() => {
+            if (!roulette.value || !isRouletteWindowOpened.value) return;
+            roulette.value.style.transition = `transform 4s ease-out`;
+            roulette.value.style.transform = `rotate(${rouletteGottenValue.value.neededRotation ?? 0}deg)`;
         }, 200);
     }
 });
 
 onMounted(() => {
-    eventsStore.getAllPrizes();
+    if (!DEMO_MODE) eventsStore.getAllPrizes();
 })
 </script>
 
@@ -159,7 +205,21 @@ onMounted(() => {
     }
 
     @media only screen and (max-width: 850px) and (max-height: 650px) {
-        transform: translateX(-50%) scale(1.4);
+        transform: translateX(-50%) scale(1.2);
+    }
+
+    @media only screen and (max-width: 600px) {
+        bottom: 26vh;
+        transform: translateX(-50%) scale(1.16);
+    }
+
+    @media only screen and (max-width: 375px) {
+        transform: translateX(-50%) scale(.98);
+    }
+
+    @media only screen and (max-width: 600px) and (max-height: 550px) {
+        bottom: 21vh;
+        transform: translateX(-50%) scale(.98);
     }
 
     .roulette-cap {

@@ -1,5 +1,6 @@
 <script setup>
-import { ref, onMounted, watchEffect, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watchEffect, watch } from 'vue';
+import { DEMO_MODE } from '@/demo/config';
 import { storeToRefs } from "pinia";
 import { useBaseStore } from '@/stores/index';
 import { useUserStore } from '@/stores/user';
@@ -17,17 +18,11 @@ const { user } = storeToRefs(userStore);
 const authStore = useAuthStore();
 const { isRegistered } = storeToRefs(authStore);
 
-const importAll = (r) => {
-  const arr = [];
-  for (const key in r) {
-      arr.push(key);
-  }
-  return arr;
-}
-const idleFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Idle/*"));
-const attackFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Attack/*"));
-const walkFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Walk/*"));
-const victoryFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Victory/*"));
+const importAll = (r) => Object.keys(r).sort().map(key => r[key]);
+const idleFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Idle/*", { eager: true, as: 'url' }));
+const attackFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Attack/*", { eager: true, as: 'url' }));
+const walkFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Walk/*", { eager: true, as: 'url' }));
+const victoryFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Victory/*", { eager: true, as: 'url' }));
 
 const _idleAnimation = ref();
 const _attackAnimation = ref();
@@ -86,6 +81,7 @@ const playNext = (name, infinite) => {
 
 let attackTimeout = ref(null);
 watchEffect(() => {
+     if (DEMO_MODE) return;
      if (myCharacterAction.value === 'attackFarm') {
       if (!creepAnimationIndicator.value) return;
         attackTimeout.value = setTimeout(() => {
@@ -111,16 +107,51 @@ watchEffect(() => {
     }
 });
 
-watchEffect(() => {
-  // if (eventAction.value === 'death' && awardsClosedIndicator.value) {
-  if (eventAction.value === 'death') {
-      play('victory', false);
-        setTimeout(() => {
-          myCharacterAction.value = 'idle';
-          play('idle', true);
-        }, 2000);
-      return;
-    }
+// The demo schedules at most one action sequence at a time. The legacy
+// watchEffect below did not cancel nested timeouts on rapid state changes.
+watch([myCharacterAction, creepAnimationIndicator], ([action, creepsActive], _old, onCleanup) => {
+  if (!DEMO_MODE) return;
+  const timers = [];
+  const later = (callback, duration) => timers.push(setTimeout(callback, duration));
+  const begin = (name, infinite = false) => {
+    queue.value.length = 0;
+    stop();
+    play(name, infinite);
+  };
+
+  if (action === 'attackFarm' && creepsActive) {
+    // Creeps are still approaching during the wind-up.
+    later(() => begin('attack'), 1000);
+    later(() => { myCharacterAction.value = 'idle'; }, 2350);
+  } else if (action === 'attack') {
+    begin('attack');
+    later(() => { myCharacterAction.value = 'idle'; }, 1300);
+  } else if (action === 'walk') {
+    begin('walk', true);
+    later(() => { myCharacterAction.value = 'idle'; }, 3500);
+  } else if (action === 'idle' && eventAction.value !== 'death') {
+    begin('idle', true);
+  }
+
+  onCleanup(() => timers.forEach(clearTimeout));
+}, { immediate: true });
+
+// An interrupted victory must return to idle rather than freeze on its last frame.
+watch(eventAction, (action, previous) => {
+  if (!DEMO_MODE || previous !== 'death' || action !== 'idle') return;
+  queue.value.length = 0;
+  stop();
+  play('idle', true);
+});
+
+watchEffect((onCleanup) => {
+  if (eventAction.value !== 'death') return;
+  play('victory', false);
+  const timer = setTimeout(() => {
+    myCharacterAction.value = 'idle';
+    play('idle', true);
+  }, 2000);
+  onCleanup(() => clearTimeout(timer));
 })
 
 
@@ -147,6 +178,27 @@ watchEffect(() => {
       }
   }
 })
+
+let queueFrame = 0;
+
+const onSpriteScroll = () => {
+  if (currentUserAction.value === 'go' || creepAnimationIndicator.value ||
+      myCharacterAction.value !== 'idle') return;
+
+  // Use the sprite's real viewport rectangle. The old formula treated an
+  // already-pixel-based position as a percentage and stopped the animation early.
+  const rect = canvas.value?.getBoundingClientRect();
+  if (!rect) return;
+  const visible = rect.right > -window.innerWidth * .15 &&
+    rect.left < window.innerWidth * 1.15;
+
+  if (!visible) {
+    if (animationState.value.state === 'playing') stop();
+  } else if (animationState.value.state === 'stopped' &&
+             !isAwardsWindowOpened.value && !isRouletteWindowOpened.value) {
+    play('idle', true);
+  }
+};
 
 onMounted(() => {
   let animationSize = 600;
@@ -188,27 +240,7 @@ onMounted(() => {
     width = 700;
   }
 
-  document.body.addEventListener('scroll', () => {
-    if (currentUserAction.value === 'go' || creepAnimationIndicator.value || myCharacterAction !== 'idle') return;
-    if (animationState.value.state === "playing" || isAwardsWindowOpened.value || isRouletteWindowOpened.value) {
-      if (Math.abs(document.body.scrollLeft - (basePosition.value)) >= width && !isRegistered.value) {
-        stop();
-      }
-      if (isRegistered.value && document.body.scrollLeft >= basePosition.value || basePosition.value - document.body.scrollLeft >= width) {
-          stop();
-      }
-      return;
-    }
-    if (animationState.value.state === "stopped" &&
-    !isAwardsWindowOpened.value && !isRouletteWindowOpened.value) {
-      if (Math.abs(document.body.scrollLeft - (basePosition.value)) < width && !isRegistered.value) {
-        play('idle', true);
-      }
-      if (isRegistered.value && (document.body.scrollLeft < basePosition.value && basePosition.value - document.body.scrollLeft < width * 1.4 )) {
-          play('idle', true);
-      }
-    }
-  })
+  document.body.addEventListener('scroll', onSpriteScroll);
 
   const handleQueue = () => {
     if (animationState.value.state === "stopped" && queue.value.length) {
@@ -216,10 +248,16 @@ onMounted(() => {
       const animation = queue.value.shift();
       _currentAnimation.value = playNext(animation.name, animation.infinite);
     }
-    requestAnimationFrame(handleQueue)
+    queueFrame = requestAnimationFrame(handleQueue)
   }
-  requestAnimationFrame(handleQueue)
+  queueFrame = requestAnimationFrame(handleQueue)
 })
+
+onUnmounted(() => {
+  cancelAnimationFrame(queueFrame);
+  _currentAnimation.value?.stopAnimation();
+  document.body.removeEventListener('scroll', onSpriteScroll);
+});
 </script>
 
 <template>

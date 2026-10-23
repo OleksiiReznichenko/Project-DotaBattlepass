@@ -75,7 +75,7 @@ const experienceLeft = computed(() => {
     top: 0;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 1000;
+    z-index: 5000;
     transition: all .2s;
 
     @media only screen and (min-width: 850px) {

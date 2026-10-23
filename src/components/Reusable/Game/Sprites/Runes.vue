@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watchEffect, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watchEffect, watch } from 'vue';
 import { storeToRefs } from "pinia";
 import { useBaseStore } from '@/stores/index';
 import { useAuthStore } from '@/stores/auth';
@@ -14,14 +14,8 @@ const { isAwardsWindowOpened, isRouletteWindowOpened } = storeToRefs(baseStore);
 const authStore = useAuthStore();
 const { isRegistered } = storeToRefs(authStore);
 
-const importAll = (r) => {
-  const arr = [];
-  for (const key in r) {
-      arr.push(key);
-  }
-  return arr;
-}
-const idleFrames = importAll(import.meta.glob("@/assets/sprites/Runes/Idle/*"));
+const importAll = (r) => Object.keys(r).sort().map(key => r[key]);
+const idleFrames = importAll(import.meta.glob("@/assets/sprites/Runes/Idle/*", { eager: true, as: 'url' }));
 const _idleAnimation = ref(null);
 
 const animationState = ref({
@@ -97,21 +91,14 @@ const checkAnimationVisibility = () => {
 };
 
 const calcPositions = () => {
-  if (!props.userId) {
-      mapWidth.value = 4 * window.outerHeight;
-
-    basePosition.value = Math.floor(((props.position) / 100) * mapWidth.value + window.outerWidth * .5);
-  } else {
-      mapWidth.value = 4 * 4 * window.outerHeight;
-
-      let positionIndex = 4;
-      if (window.outerWidth < 600) {
-        positionIndex = 5;
-      }
-
-      basePosition.value = Math.floor((Math.abs(props.position + positionIndex) / 100) * mapWidth.value);
+  // The public demo has four regions. Use the actual event offset instead of
+  // calculating a position from the old single-region guest map.
+  const eventElement = canvas.value?.closest('.event');
+  if (eventElement) {
+    basePosition.value = eventElement.getBoundingClientRect().left +
+      document.body.scrollLeft + eventElement.clientWidth / 2;
   }
-}
+};
 
 watchEffect(() => {
   if (isAwardsWindowOpened.value || isRouletteWindowOpened.value) {
@@ -141,6 +128,12 @@ watchEffect(() => {
   }
 })
 
+let queueFrame = 0;
+
+const onSpriteScroll = () => {
+  checkAnimationVisibility();
+};
+
 onMounted(() => {
     _idleAnimation.value = new TileAnimation(canvas.value, 1200, 1200, idleFrames);
 
@@ -149,9 +142,7 @@ onMounted(() => {
   calcPositions();
   checkAnimationVisibility();
 
-  document.body.addEventListener('scroll', () => {
-    checkAnimationVisibility();
-  })
+  document.body.addEventListener('scroll', onSpriteScroll);
 
   const handleQueue = () => {
     if (animationState.value.state === "stopped" && queue.value.length) {
@@ -159,10 +150,16 @@ onMounted(() => {
       const animation = queue.value.shift();
       _currentAnimation.value = playNext(animation.name, animation.infinite);
     }
-    requestAnimationFrame(handleQueue)
+    queueFrame = requestAnimationFrame(handleQueue)
   }
-  requestAnimationFrame(handleQueue);
+  queueFrame = requestAnimationFrame(handleQueue);
 })
+
+onUnmounted(() => {
+  cancelAnimationFrame(queueFrame);
+  _currentAnimation.value?.stopAnimation();
+  document.body.removeEventListener('scroll', onSpriteScroll);
+});
 </script>
 
 <template>

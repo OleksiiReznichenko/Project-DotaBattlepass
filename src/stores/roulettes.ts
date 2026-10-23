@@ -142,15 +142,23 @@ export const useRoulettesStore = defineStore({
                 const neededSegmentIndex = Math.floor(Math.random() * finalResultObject!.amountSegments);
                 neededSegment = finalResultObject!.segmentsNumbers[neededSegmentIndex];
             } else {
-                if (roulette.rouletteType === 'attackFarm') {
-                    finalResult = 150;
-                    neededSegment = 7;
-                } else if (roulette.rouletteType === 'freeSpins') {
-                    finalResult = 3;
-                    neededSegment = 6;
-                } else if (roulette.rouletteType === 'runes') {
-                    finalResult = 'RuneWater';
-                    neededSegment = 1;
+                // Local demo: select a weighted outcome, then a matching visible segment.
+                // No remote roulette service, money, or prizes are involved.
+                const validOptions = roulette.valuesInfo.filter(option =>
+                    option.probability > 0 && option.segmentsNumbers.length > 0
+                );
+                const totalWeight = validOptions.reduce((sum, option) => sum + option.probability, 0);
+                let ticket = Math.random() * totalWeight;
+                const selected = validOptions.find(option => {
+                    ticket -= option.probability;
+                    return ticket < 0;
+                }) || validOptions[validOptions.length - 1];
+
+                if (selected) {
+                    finalResult = selected.value;
+                    neededSegment = selected.segmentsNumbers[
+                        Math.floor(Math.random() * selected.segmentsNumbers.length)
+                    ];
                 }
             }
 

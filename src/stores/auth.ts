@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { DEMO_MODE } from '@/demo/config';
 import { useUserStore } from '@/stores/user';
 import { useRouletteStore } from '@/stores/roulette';
 import { useEventsStore } from '@/stores/events';
@@ -31,11 +32,11 @@ export const useAuthStore = defineStore({
     } as UserData,
     isRegistered: false,
     token: null,
-    // token: 'e586519d-5932-4ce3-9fd4-246e6fde5a3e',
   }),
 
   actions: {
     async login(zone: string, token: string) {
+      if (DEMO_MODE) return;
       await authApiService
         .authorization(zone, token)
         .then((response: any) => {

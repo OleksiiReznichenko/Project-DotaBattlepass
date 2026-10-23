@@ -401,7 +401,7 @@ export const useEventsStore = defineStore({
                 },
                 {
                     id: 13,
-                    name: 'Трон',
+                    name: 'Throne',
                     icon: 'Ancient',
                     myCharacterLeftPosition: 90,
                     userLevel: 24,

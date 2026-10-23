@@ -5,6 +5,7 @@ import { useUserStore } from '@/stores/user';
 import { useAuthStore } from '@/stores/auth';
 import { computed, onMounted, ref, watch, watchEffect } from "vue";
 import { useRouletteStore } from '@/stores/roulette';
+import { DEMO_MODE } from '@/demo/config';
 
 const baseStore = useBaseStore();
 const { isAwardsWindowOpened, previewClosedIndicator } = storeToRefs(baseStore);
@@ -27,7 +28,7 @@ const description = computed(() => {
         return user.value.level + ' level';
     } else {
         // return 'Не зарегистрирован';
-        return 'Not registered';
+        return DEMO_MODE ? 'Frontend demo' : 'Not registered';
     }
 });
 
@@ -37,7 +38,7 @@ const buttonText = computed(() => {
         return 'Play';
     } else {
         // return 'Начать';
-        return 'Start';
+        return DEMO_MODE ? 'Explore game' : 'Start';
     }
 });
 
@@ -81,7 +82,7 @@ onMounted(() => {
     setTimeout(() => {
         preloaderFinishedIndicator.value = true;
         previewClosedIndicator.value = true;
-    }, 8000);
+    }, DEMO_MODE ? 1100 : 8000);
 });
 </script>
 
@@ -94,7 +95,7 @@ onMounted(() => {
                 <!-- <img src="@/assets/svg/gameLogo.svg" alt="" class="game-logo"> -->
                 <h1 class="title">Dota Boom</h1>
                 <!-- <p class="description">Играй каждый день, <br> получай гарантированные бонусы  <br>и шанс выиграть суперпризы!</p> -->
-                <p class="description">Play everyday, get <br> guaranteed bonuses and  <br> a chance to win super prizes!</p>
+                <p class="description">Explore the animated Dota-inspired map, <br> encounters and level progression. <br> This is a frontend demo with no real prizes!</p>
             </div>
             <div v-if="preloaderFinishedIndicator" class="button-container">
             <!-- <div class="button-container"> -->

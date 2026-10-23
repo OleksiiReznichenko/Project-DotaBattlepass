@@ -61,7 +61,7 @@ const auth = (): void => {
         <div class="content">
             <!-- <h2 class="title">Новые награды ждут тебя!</h2> -->
             <h2 class="title">New rewards are waiting for you!</h2>
-            <!-- <p class="description">Игровой ПК всего в двух шагах. Пройди регистрацию и сломай вражеский трон!</p> -->
+            <!-- <p class="description">Игровой ПК всего в двух шагах. Пройди регистрацию и сломай вражеский Throne!</p> -->
             <p class="description">A gaming PC is just a step away. Register and destroy the enemy throne!</p>
             <div class="award">
                 <div class="image-container">

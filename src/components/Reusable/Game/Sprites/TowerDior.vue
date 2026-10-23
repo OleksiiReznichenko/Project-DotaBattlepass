@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watchEffect, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watchEffect, watch } from 'vue';
 import { storeToRefs } from "pinia";
 import { useBaseStore } from '@/stores/index';
 
@@ -8,17 +8,11 @@ import TileAnimation from '@/assets/js/tile-animation';
 const baseStore = useBaseStore();
 const { isAwardsWindowOpened, isRouletteWindowOpened, goToNextEvent, myCharacterAction } = storeToRefs(baseStore);
 
-const importAll = (r) => {
-  const arr = [];
-  for (const key in r) {
-      arr.push(key);
-  }
-  return arr;
-}
-const idleFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Idle/*"));
-const attackFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Attack/*"));
-const walkFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Walk/*"));
-const victoryFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Victory/*"));
+const importAll = (r) => Object.keys(r).sort().map(key => r[key]);
+const idleFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Idle/*", { eager: true, as: 'url' }));
+const attackFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Attack/*", { eager: true, as: 'url' }));
+const walkFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Walk/*", { eager: true, as: 'url' }));
+const victoryFrames = importAll(import.meta.glob("@/assets/sprites/Faceless_void/Victory/*", { eager: true, as: 'url' }));
 
 const _idleAnimation = ref();
 const _attackAnimation = ref();
@@ -83,6 +77,8 @@ const playNext = (name, infinite) => {
   }
 }
 
+let queueFrame = 0;
+
 onMounted(() => {
   _idleAnimation.value = new TileAnimation(canvas.value, 600, 600, idleFrames);
   _attackAnimation.value = new TileAnimation(canvas.value, 600, 600, attackFrames);
@@ -102,10 +98,15 @@ onMounted(() => {
       const animation = queue.value.shift();
       _currentAnimation.value = playNext(animation.name, animation.infinite);
     }
-    requestAnimationFrame(handleQueue)
+    queueFrame = requestAnimationFrame(handleQueue)
   }
-  requestAnimationFrame(handleQueue)
+  queueFrame = requestAnimationFrame(handleQueue)
 })
+
+onUnmounted(() => {
+  cancelAnimationFrame(queueFrame);
+  _currentAnimation.value?.stopAnimation();
+});
 </script>
 
 <template>

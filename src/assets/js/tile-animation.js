@@ -29,8 +29,10 @@ function CreateSprite(canvas, width, height, frames = [], options = {
             imageWidth = width;
         }
 
-        canvas.width = canvasWidth;
-        canvas.height = canvasHeight;
+        if (canvas.width !== canvasWidth || canvas.height !== canvasHeight) {
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+        }
         canvas.style.width = `${canvasWidth}px`;
         canvas.style.height = `${canvasHeight}px`;
     }
@@ -44,8 +46,12 @@ function CreateSprite(canvas, width, height, frames = [], options = {
     });
 
     const updateImage = index => {
+        const frame = frames[index];
+        // Frames load asynchronously, particularly when arriving via a jump to another map region.
+        // Drawing an unready or broken image would throw and stop the animation loop.
+        if (!frame || !frame.complete || frame.naturalWidth === 0) return;
         context.clearRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(frames[index], this.options.right ? canvasWidth - imageWidth : 0, canvasHeight - imageHeight, imageWidth, imageHeight);
+        context.drawImage(frame, this.options.right ? canvasWidth - imageWidth : 0, canvasHeight - imageHeight, imageWidth, imageHeight);
     };
 
     this.queue = [];

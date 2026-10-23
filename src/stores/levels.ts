@@ -18,38 +18,14 @@ export const useLevelsStore = defineStore({
 
   actions: {
     setStaticLevels() {
-        this.levels = [
-            {
-                description: '',
-                id: '1',
-                levelId: 1,
-                points: 0,
-            },
-            {
-                description: '',
-                id: '2',
-                levelId: 2,
-                points: 150,
-            },
-            {
-                description: '',
-                id: '3',
-                levelId: 3,
-                points: 300,
-            },
-            {
-                description: '',
-                id: '4',
-                levelId: 4,
-                points: 500,
-            },
-            {
-                description: '',
-                id: '5',
-                levelId: 5,
-                points: 650,
-            }
-        ]
+        // Covers all 25 stages referenced by the original long map.
+        // Fictional XP values only, never synchronized with the old backend.
+        this.levels = Array.from({ length: 25 }, (_, index) => ({
+            description: '',
+            id: String(index + 1),
+            levelId: index + 1,
+            points: index * 150,
+        }));
     },
     async getLevels() {
         await levelsApiService.getLevels()

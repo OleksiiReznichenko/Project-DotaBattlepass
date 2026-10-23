@@ -2,6 +2,8 @@ import { defineStore } from 'pinia';
 import type RouletteGottenValue from "@/interfaces/rouletteGottenValue";
 
 interface State {
+  activeEventLevel: number;
+  completedEventLevels: number[];
   isAwardsWindowOpened: boolean;
   awardScreenType: 'event' | 'level';
   isRouletteWindowOpened: boolean;
@@ -26,6 +28,8 @@ export const useBaseStore = defineStore({
   id: 'baseStore',
 
   state: (): State => ({
+    activeEventLevel: 1,
+    completedEventLevels: [],
     isAwardsWindowOpened: false,
     awardScreenType: 'event',
     isRouletteWindowOpened: false,

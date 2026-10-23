@@ -129,7 +129,7 @@ const myPosition = computed(() => {
     if (levels.value.length < 1) return;
     if (updateProgressBarPositionIndicator.value || previewClosedIndicator.value) {
         const currentEvent = fightEvents.value.find((el, i, arr) => {
-            return el.userLevel === user.value.level || user.value.level - arr[i + 1].userLevel < 0;
+            return el.userLevel === user.value.level || (arr[i + 1] && user.value.level < arr[i + 1].userLevel);
         });
         const currentEventLevel = levels.value.find(el => {
             return el.levelId === currentEvent?.userLevel;

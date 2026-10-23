@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watchEffect, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watchEffect, watch } from 'vue';
 import { storeToRefs } from "pinia";
 import { useBaseStore } from '@/stores/index';
 import { useAuthStore } from '@/stores/auth';
@@ -14,14 +14,8 @@ const { isAwardsWindowOpened, isRouletteWindowOpened, myCharacterAction, eventAc
 const authStore = useAuthStore();
 const { isRegistered } = storeToRefs(authStore);
 
-const importAll = (r) => {
-  const arr = [];
-  for (const key in r) {
-      arr.push(key);
-  }
-  return arr;
-}
-const idleFrames = ref(importAll(import.meta.glob("/src/assets/sprites/Shadow_Fiend/Idle/*")));
+const importAll = (r) => Object.keys(r).sort().map(key => r[key]);
+const idleFrames = ref(importAll(import.meta.glob("/src/assets/sprites/Shadow_Fiend/Idle/*", { eager: true, as: 'url' })));
 const damageFrames = ref(null);
 const deathFrames = ref(null);
 
@@ -123,21 +117,12 @@ const checkAnimationVisibility = () => {
 };
 
 const calcPositions = () => {
-  if (!props.userId) {
-      mapWidth.value = 4 * window.outerHeight;
-
-    basePosition.value = Math.floor(((props.position + 3) / 100) * mapWidth.value);
-  } else {
-      mapWidth.value = 4 * 4 * window.outerHeight;
-
-    let positionIndex = 3;
-    if (window.outerWidth < 600) {
-      positionIndex = 4;
-    }
-
-    basePosition.value = Math.floor((Math.abs(props.position + positionIndex) / 100) * mapWidth.value);
+  const eventElement = canvas.value?.closest('.event');
+  if (eventElement) {
+    basePosition.value = eventElement.getBoundingClientRect().left +
+      document.body.scrollLeft + eventElement.clientWidth / 2;
   }
-}
+};
 
 watchEffect(() => {
   if (myCharacterAction.value === 'deathAttack') return;
@@ -174,8 +159,8 @@ watchEffect(() => {
 
 watchEffect(() => {
   if (props.userId && props.userLevel === 21) {
-    deathFrames.value = importAll(import.meta.glob("/src/assets/sprites/Shadow_Fiend/Death/*"));
-    damageFrames.value = importAll(import.meta.glob("/src/assets/sprites/Shadow_Fiend/Damage/*"));
+    deathFrames.value = importAll(import.meta.glob("/src/assets/sprites/Shadow_Fiend/Death/*", { eager: true, as: 'url' }));
+    damageFrames.value = importAll(import.meta.glob("/src/assets/sprites/Shadow_Fiend/Damage/*", { eager: true, as: 'url' }));
   }
 })
 
@@ -198,6 +183,12 @@ watchEffect(() => {
   }
 })
 
+let queueFrame = 0;
+
+const onSpriteScroll = () => {
+  checkAnimationVisibility();
+};
+
 onMounted(() => {
   _idleAnimation.value = new TileAnimation(canvas.value, 1300, 1000, idleFrames.value);
 
@@ -206,9 +197,7 @@ onMounted(() => {
   calcPositions();
   checkAnimationVisibility();
 
-  document.body.addEventListener('scroll', () => {
-    checkAnimationVisibility();
-  })
+  document.body.addEventListener('scroll', onSpriteScroll);
   
   const handleQueue = () => {
     if (animationState.value.state === "stopped" && queue.value.length) {
@@ -216,10 +205,16 @@ onMounted(() => {
       const animation = queue.value.shift();
       _currentAnimation.value = playNext(animation.name, animation.infinite);
     }
-    requestAnimationFrame(handleQueue)
+    queueFrame = requestAnimationFrame(handleQueue)
   }
-  requestAnimationFrame(handleQueue)
+  queueFrame = requestAnimationFrame(handleQueue)
 })
+
+onUnmounted(() => {
+  cancelAnimationFrame(queueFrame);
+  _currentAnimation.value?.stopAnimation();
+  document.body.removeEventListener('scroll', onSpriteScroll);
+});
 </script>
 
 <template>

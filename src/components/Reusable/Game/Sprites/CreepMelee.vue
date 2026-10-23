@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watchEffect, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watchEffect, watch } from 'vue';
 import { storeToRefs } from "pinia";
 import { useBaseStore } from '@/stores/index';
 
@@ -8,16 +8,10 @@ import TileAnimation from '@/assets/js/tile-animation';
 const baseStore = useBaseStore();
 const { isAwardsWindowOpened, isRouletteWindowOpened, myCharacterPosition, myCharacterAction, creepAnimationIndicator } = storeToRefs(baseStore);
 
-const importAll = (r) => {
-  const arr = [];
-  for (const key in r) {
-      arr.push(key);
-  }
-  return arr;
-}
-const walkFrames = importAll(import.meta.glob("@/assets/sprites/Creep_Melee/Walk/*"));
-const deathFrames = importAll(import.meta.glob("@/assets/sprites/Creep_Melee/Death/*"));
-const attackFrames = importAll(import.meta.glob("@/assets/sprites/Creep_Melee/Attack/*"));
+const importAll = (r) => Object.keys(r).sort().map(key => r[key]);
+const walkFrames = importAll(import.meta.glob("@/assets/sprites/Creep_Melee/Walk/*", { eager: true, as: 'url' }));
+const deathFrames = importAll(import.meta.glob("@/assets/sprites/Creep_Melee/Death/*", { eager: true, as: 'url' }));
+const attackFrames = importAll(import.meta.glob("@/assets/sprites/Creep_Melee/Attack/*", { eager: true, as: 'url' }));
 
 const _walkAnimation = ref();
 const _deathAnimation = ref();
@@ -66,18 +60,32 @@ const playNext = (name, infinite) => {
   }
 }
 
-let deathTimeout = ref(null);
-watchEffect(() => {
-  if (creepAnimationIndicator.value) {
-    play('walk', true);
-    deathTimeout.value = setTimeout(() => {
-      deathTimeout.value = null;
-      play('death', false);
-    }, 2200);
-  } else {
+// These temporary farm sprites must not remain as frozen final frames.
+// Restart and clean up their animation state on every demo farm cycle.
+const isVisible = ref(false);
+watch(creepAnimationIndicator, (active, _previous, onCleanup) => {
+  queue.value.length = 0;
+  stop();
+  isVisible.value = active;
+  if (!active) return;
+
+  play('walk', true);
+  const deathTimer = setTimeout(() => {
+    play('death', false);
+  }, 1500);
+  const hideTimer = setTimeout(() => {
+    isVisible.value = false;
+    queue.value.length = 0;
     stop();
-  }
-});
+  }, 2600);
+
+  onCleanup(() => {
+    clearTimeout(deathTimer);
+    clearTimeout(hideTimer);
+  });
+}, { immediate: true });
+
+let queueFrame = 0;
 
 onMounted(() => {
   _walkAnimation.value = new TileAnimation(canvas.value, 250, 250, walkFrames);
@@ -94,15 +102,20 @@ onMounted(() => {
       const animation = queue.value.shift();
       _currentAnimation.value = playNext(animation.name, animation.infinite);
     }
-    requestAnimationFrame(handleQueue)
+    queueFrame = requestAnimationFrame(handleQueue)
   }
-  requestAnimationFrame(handleQueue)
+  queueFrame = requestAnimationFrame(handleQueue)
 })
+
+onUnmounted(() => {
+  cancelAnimationFrame(queueFrame);
+  _currentAnimation.value?.stopAnimation();
+});
 </script>
 
 <template>
   <!-- <div class="sprite-container"> -->
-    <canvas ref="canvas" class="main-frame"></canvas>
+    <canvas ref="canvas" v-show="isVisible" class="main-frame"></canvas>
   <!-- </div> -->
 </template>
 

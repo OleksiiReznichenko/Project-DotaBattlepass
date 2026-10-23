@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { DEMO_MODE } from '@/demo/config';
 import { useAuthStore } from "@/stores/auth";
 import { storeToRefs } from 'pinia';
 
@@ -16,6 +17,9 @@ const _axiosInstance = axios.create({
 });
 
 _axiosInstance.interceptors.request.use((req) => {
+  if (DEMO_MODE) {
+    return Promise.reject(new axios.Cancel('External APIs are disabled in the public demo'));
+  }
   const authStore = useAuthStore();
 
   const { token: { value: token }  } = storeToRefs(authStore);

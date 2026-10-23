@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch, watchEffect } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue';
 import { gsap } from 'gsap';
 import { storeToRefs } from "pinia";
 import { useBaseStore } from '@/stores/index';
@@ -19,6 +19,8 @@ import RouletteScreen from '@/components/Singular/Game/RouletteScreen.vue';
 import RotateScreen from '@/components/Singular/Game/RotateScreen.vue';
 import Event from '@/components/Reusable/Game/Event.vue';
 import RegistrationAwardWindow from '@/components/Singular/Game/RegistrationAwardWindow.vue';
+import { DEMO_MODE } from '@/demo/config';
+import { demoAction, nextUnlockedEncounter } from '@/demo/progression';
 import MyCharacter from '@/components/Reusable/Game/Sprites/MyCharacter.vue';
 import CreepMelee from '@/components/Reusable/Game/Sprites/CreepMelee.vue';
 import CreepRange from '@/components/Reusable/Game/Sprites/CreepRange.vue';
@@ -26,8 +28,8 @@ import type { LevelRequest } from '@/services/api/levels';
 
 const baseStore = useBaseStore();
 const { 
-    currentUserAction, goToNextEvent, myCharacterPosition, 
-    creepAnimationIndicator, previewClosedIndicator,
+    activeEventLevel, completedEventLevels, currentUserAction, goToNextEvent, myCharacterPosition,
+    myCharacterAction, creepAnimationIndicator, previewClosedIndicator,
     isRouletteWindowOpened, updateProgressBarPositionIndicator
     } = storeToRefs(baseStore);
 
@@ -60,14 +62,27 @@ const creepMelee = ref<null | HTMLElement>(null);
 const creepRange = ref<null | HTMLElement>(null);
 const mapProgressBar = ref<null | HTMLElement>(null);
 
-const promptWrapper = ref<null | HTMLElement>(null);
-const prompt1 = ref<null | HTMLElement>(null);
-const prompt2 = ref<null | HTMLElement>(null);
-const prompt3 = ref<null | HTMLElement>(null);
-const prompt4 = ref<null | HTMLElement>(null);
-const prompt5 = ref<null | HTMLElement>(null);
-const prompt6 = ref<null | HTMLElement>(null);
-const prompt7 = ref<null | HTMLElement>(null);
+const isHelpDismissed = ref(false);
+const isViewingTutorialArea = ref(true);
+const helpDismissalKey = 'dota-boom-demo-help-dismissed';
+
+const dismissHelp = (): void => {
+    isHelpDismissed.value = true;
+    if (DEMO_MODE) {
+        try {
+            window.sessionStorage.setItem(helpDismissalKey, '1');
+        } catch {
+            // The close button must still work when session storage is unavailable.
+        }
+    }
+};
+
+const updateTutorialVisibility = (): void => {
+    if (!DEMO_MODE || !mainMap.value) return;
+    const cameraCenter = document.body.scrollLeft + window.innerWidth / 2;
+    // The first tower and first Rune are in the opening 12% of the map.
+    isViewingTutorialArea.value = cameraCenter <= mainMap.value.clientWidth * .12;
+};
 let screenScrollTime = ref<number>(1900);
 let scrollingAnimationIndicator = ref<boolean>(false);
 let stopScrollingAnimationIndicator = ref<boolean>(false);
@@ -97,7 +112,7 @@ let prevBlackLayerForegroundTranslate = ref<number>(1);
 
 const currentEvent = computed<undefined | fightEvent>(() => {
     return fightEvents.value.find(el => {
-        return el.userLevel === user.value.level;
+        return el.userLevel === (DEMO_MODE ? activeEventLevel.value : user.value.level);
     })
 })
 
@@ -126,13 +141,18 @@ const isTouchDevice = () => {
 
 const calcCharacterPosition = (): void => {
     if (myCharacter.value && fightEvents.value.length >= 1) {
-        let currentEvent = fightEvents.value.find((el, i, arr) => {
-            if (el.userLevel === user.value.level) {
-                return el.userLevel === user.value.level;
-            } else if (arr[i + 1]?.userLevel) {
-                return el.userLevel === user.value.level || user.value.level - arr[i + 1].userLevel < 0;
-            }
-        });
+        // In the demo, Go travels to the upcoming encounter. The legacy lookup
+        // selected the previous encounter at intermediate levels (e.g. 6 -> 5,
+        // although the next map destination is level 7), making Go appear stuck.
+        let currentEvent = DEMO_MODE
+            ? fightEvents.value.find(event => event.userLevel === activeEventLevel.value)
+            : fightEvents.value.find((el, i, arr) => {
+                if (el.userLevel === user.value.level) {
+                    return el.userLevel === user.value.level;
+                } else if (arr[i + 1]?.userLevel) {
+                    return el.userLevel === user.value.level || (arr[i + 1] && user.value.level < arr[i + 1].userLevel);
+                }
+            });
         if (!currentEvent && user.value.level >= levels.value[levels.value.length - 1].levelId) {
             currentEvent = fightEvents.value[fightEvents.value.length - 1]
         }
@@ -144,7 +164,7 @@ const calcCharacterPosition = (): void => {
             }
         }
 
-        if (user.value.level < 3 && window.outerWidth > 1600) {
+        if (!DEMO_MODE && user.value.level < 3 && window.outerWidth > 1600) {
             if (!isRegistered.value) {
                 xPercent = 2;
             } else {
@@ -166,8 +186,41 @@ const calcCharacterPosition = (): void => {
     }
 };
 
+// Keep the camera movement synchronized with the hero's original 2.5s walk transition.
+// Users can still take control by dragging, scrolling or choosing a region.
+let demoCameraTween: gsap.core.Tween | null = null;
+
+const stopDemoCamera = (): void => {
+    demoCameraTween?.kill();
+    demoCameraTween = null;
+};
+
 const calcScrollPosition = (): void => {
-    if (!window || !document.body || !user.value || !mainMap.value?.clientWidth) return;
+    if (!document.body || !user.value || !mainMap.value?.clientWidth) return;
+    if (DEMO_MODE && myCharacter.value) {
+        // Sprite artwork sits toward the left side of the character canvas.
+        // Use its actual map position, not obsolete percentages of a 400vh map.
+        const heroCenter = myCharacter.value.offsetLeft + myCharacterPosition.value +
+            myCharacter.value.offsetWidth * .35;
+        const maxScroll = Math.max(0, mainMap.value.clientWidth - window.innerWidth);
+        const destination = Math.max(0, Math.min(maxScroll, heroCenter - window.innerWidth / 2));
+        stopDemoCamera();
+        if (!isScrollOnInitialPosition.value) {
+            // Enter the game centered on the current hero, without an opening camera pan.
+            document.body.scrollLeft = destination;
+            isScrollOnInitialPosition.value = true;
+        } else if (Math.abs(destination - document.body.scrollLeft) > 2) {
+            const camera = { left: document.body.scrollLeft };
+            demoCameraTween = gsap.to(camera, {
+                left: destination,
+                duration: 2.5,
+                ease: 'power1.inOut',
+                onUpdate: () => { document.body.scrollLeft = camera.left; },
+                onComplete: () => { demoCameraTween = null; },
+            });
+        }
+        return;
+    }
     let scrollPosition = 0;
     if (user.value.level < 3) {
         if (window.outerWidth > 850) {
@@ -235,7 +288,7 @@ const calcScrollPosition = (): void => {
         }
 
         if (!currentEventPosition || !mainMap.value) return;
-        if (isRegistered.value) {
+        if (isRegistered.value || DEMO_MODE) {
             if (window.outerWidth > 850) {
                 scrollPosition = (currentEventPosition - 3) / 100 * (mainMap.value.clientWidth);
             } else if (window.outerWidth <= 850 && window.outerWidth > 600) {
@@ -293,20 +346,21 @@ const goToEvent = (event: Event): void => {
 
     const eventCircle = target.closest('.event-circle') as HTMLElement;
     if (!eventCircle) return;
+    stopDemoCamera();
     let currentEventPosition = 0, currentEventIndex: number;
     if (!eventCircle.classList.contains('my-character')) {
         const id = eventCircle.dataset.id!;
-        const currentEvent = fightEvents.value.find(el => {
-            return el.id === +id;
-        })!;
+        const currentEvent = fightEvents.value.find(el => el.id === Number(id));
+        if (!currentEvent) return;
         currentEventIndex = fightEvents.value.findIndex(el => {
             return el.id === +id;
         });
         currentEventPosition = currentEvent.myCharacterLeftPosition;
     } else {
-        const currentEvent = fightEvents.value.find((el, i, arr) => {
-            return el.userLevel === user.value.level || user.value.level - arr[i + 1].userLevel < 0;
-        })!;
+        const currentEvent = fightEvents.value.find((el, i, arr) =>
+            el.userLevel === user.value.level || (arr[i + 1] && user.value.level < arr[i + 1].userLevel)
+        ) || fightEvents.value[fightEvents.value.length - 1];
+        if (!currentEvent) return;
         currentEventPosition = currentEvent.myCharacterLeftPosition;
         currentEventIndex = fightEvents.value.findIndex(el => {
             return el.id === +currentEvent.id;
@@ -316,7 +370,7 @@ const goToEvent = (event: Event): void => {
     if (!currentEventPosition && currentEventPosition !== 0 || !mainMap.value) return;
     finishedAnimationIndicator.value = false;
     let scrollPosition = 0;
-    if (isRegistered.value) {
+    if (isRegistered.value || DEMO_MODE) {
         if (window.outerWidth > 850) {
             scrollPosition = (currentEventPosition - 2.5) / 100 * (mainMap.value.clientWidth);
         } else if (window.outerWidth <= 850 && window.outerWidth > 600) {
@@ -351,6 +405,26 @@ const goToEvent = (event: Event): void => {
 };
 
 
+// The four original 400vh regions can be explored independently of XP.
+// Navigation controls only the local horizontal scroll, not game progression.
+const isRegionMenuOpen = ref(false);
+
+const demoRegions = [
+    { id: 'radiant', label: 'Radiant', progress: 0 },
+    { id: 'river', label: 'River', progress: 0.255 },
+    { id: 'dire', label: 'Dire', progress: 0.505 },
+    { id: 'ancient', label: 'Ancient', progress: 0.755 },
+] as const;
+
+const goToRegion = (progress: number): void => {
+    if (!DEMO_MODE || !mainMap.value) return;
+    stopScrollingAnimationIndicator.value = true;
+    stopDemoCamera();
+    isRegionMenuOpen.value = false;
+    const maxScroll = Math.max(0, mainMap.value.clientWidth - window.innerWidth);
+    document.body.scrollTo({ left: Math.min(maxScroll, mainMap.value.clientWidth * progress), behavior: 'smooth' });
+};
+
 const calcParallaxPosition = (): void => {
     if (window.outerWidth < 1400 && mainMap.value && mapProgressBar.value) {
         if (document.body.scrollLeft < startingCameraPosition.value + 20) return;
@@ -384,9 +458,8 @@ const calcParallaxPosition = (): void => {
     prevWhiteLayerBackTranslate.value = whiteLayerBackTranslateValue;
     prevWhiteLayerForegroundTranslate.value = whiteLayerForegroundTranslateValue;
 
-    if (!isRegistered.value) return;
+    if (!isRegistered.value && !DEMO_MODE) return;
 
-    
     const percentRiverLocation = Math.floor((document.body.scrollLeft - locationScrollWidth.value - 0.75 * halfWidth.value) / percentStep.value) / 100;
 
     if (percentRiverLocation >= 0 && percentRiverLocation <= 100) {
@@ -447,78 +520,106 @@ const calcParallaxPosition = (): void => {
     }
 };
 
-watchEffect(() => {
-    if (myCharacter.value && goToNextEvent.value) {
-        calcCharacterPosition();
-        calcScrollPosition();
+let finishGoTimeout: ReturnType<typeof setTimeout> | null = null;
+watch(goToNextEvent, (requested) => {
+    if (!requested) return;
+
+    // A movement request must always finish or reset. Previously the request
+    // could stay pending if the map had not mounted yet.
+    if (!myCharacter.value || !mainMap.value) {
         goToNextEvent.value = false;
-        setTimeout(() => {
+        if (DEMO_MODE) {
+            myCharacterAction.value = 'idle';
             checkUserAction(true);
-            updateProgressBarPositionIndicator.value = true;
-        }, 2700);
-    }
-});
-
-let opacityTimeout = ref<any>(null);
-watchEffect(() => {
-    if (!creepMelee.value || !creepRange.value || !fightEvents.value) return;
-    if (creepAnimationIndicator.value) {
-        const currentEvent = fightEvents.value.find((el, i, arr) => {
-            if (currentUserAction.value === 'go') {
-                if (el.userLevel === user.value.level - 1) {
-                    return el;
-                } else if (arr[i + 2]?.userLevel) {
-                    return el.userLevel === user.value.level || user.value.level - arr[i + 2].userLevel < 0;
-                }
-            }
-            if (el.userLevel === user.value.level) {
-                return el;
-            } else if (arr[i + 1]?.userLevel) {
-                return el.userLevel === user.value.level || user.value.level - arr[i + 1].userLevel < 0;
-            }
-        })!;
-        let position = mainMap.value!.clientWidth / 100 * (currentEvent.myCharacterLeftPosition + 3) + window.outerWidth;
-        if (!isRegistered.value) {
-            position = mainMap.value!.clientWidth / 100 * (currentEvent.myCharacterLeftPosition + 11) + window.outerWidth;
         }
-        creepMelee.value.style.transition = 'none';
-        creepMelee.value.style.transform = `translateX(${position}px)`;
-
-        creepRange.value.style.transition = 'none';
-        creepRange.value.style.transform = `translateX(${position}px)`;
-        if (currentUserAction.value !== 'go') {
-            calcScrollPosition();
-        }
-        setTimeout(() => {
-            creepMelee.value!.style.transition = 'transform 1s, opacity .3s';
-            creepMelee.value!.style.opacity = '1';
-            creepMelee.value!.style.transform = `translateX(${position - window.outerWidth}px)`;
-            
-            creepRange.value!.style.transition = 'transform 1s, opacity .3s';
-            creepRange.value!.style.opacity = '1';
-            creepRange.value!.style.transform = `translateX(${position - window.outerWidth * .9}px)`;
-            opacityTimeout.value = setTimeout(() => {
-                creepAnimationIndicator.value = false;
-                creepMelee.value!.style.opacity = '0';
-                creepRange.value!.style.opacity = '0';
-                opacityTimeout.value = null;
-            }, 3500);
-        }, 500);
-    } else {
-        creepMelee.value.style.transition = 'none';
-        creepRange.value.style.transition = 'none';
-        creepMelee.value!.style.opacity = '0';
-        creepRange.value!.style.opacity = '0';
-        opacityTimeout.value = null;
+        return;
     }
-})
+
+    if (DEMO_MODE) {
+        const destination = nextUnlockedEncounter(
+            fightEvents.value, activeEventLevel.value, user.value.level
+        );
+        if (!destination) {
+            goToNextEvent.value = false;
+            myCharacterAction.value = 'idle';
+            checkUserAction(true);
+            return;
+        }
+        activeEventLevel.value = destination.userLevel;
+    }
+
+    calcCharacterPosition();
+    calcScrollPosition();
+    goToNextEvent.value = false;
+    if (finishGoTimeout) clearTimeout(finishGoTimeout);
+    finishGoTimeout = setTimeout(() => {
+        finishGoTimeout = null;
+        myCharacterAction.value = 'idle';
+        // Update the available action only after reaching the destination.
+        checkUserAction(true);
+        updateProgressBarPositionIndicator.value = true;
+    }, 2700);
+}, { immediate: true, flush: 'post' });
+
+let approachCreepsTimeout: ReturnType<typeof setTimeout> | null = null;
+let opacityTimeout: ReturnType<typeof setTimeout> | null = null;
+watch(creepAnimationIndicator, (active, _previous, onCleanup) => {
+    if (!creepMelee.value || !creepRange.value || !mainMap.value) return;
+    const melee = creepMelee.value;
+    const ranged = creepRange.value;
+    if (!active) {
+        melee.style.opacity = '0';
+        ranged.style.opacity = '0';
+        return;
+    }
+
+    const encounter = fightEvents.value.find(event => event.userLevel ===
+        (DEMO_MODE ? activeEventLevel.value : user.value.level));
+    if (!encounter) return;
+    const heroX = myCharacter.value
+        ? myCharacter.value.offsetLeft + myCharacterPosition.value + myCharacter.value.offsetWidth * .38
+        : mainMap.value.clientWidth * encounter.myCharacterLeftPosition / 100;
+    const destination = DEMO_MODE ? heroX : heroX + window.innerWidth * .2;
+    const start = destination + (DEMO_MODE ? Math.max(320, window.innerWidth * .35) : window.innerWidth);
+
+    for (const creep of [melee, ranged]) {
+        creep.style.transition = 'none';
+        creep.style.opacity = '0';
+        creep.style.transform = `translateX(${start}px)`;
+    }
+    // Force a layout boundary before starting their approach. They reach melee
+    // range just before the hero's hit, not several seconds beforehand.
+    approachCreepsTimeout = setTimeout(() => {
+        melee.style.transition = 'transform .95s ease-out, opacity .15s';
+        ranged.style.transition = 'transform .95s ease-out, opacity .15s';
+        melee.style.opacity = '1';
+        ranged.style.opacity = '1';
+        melee.style.transform = `translateX(${destination}px)`;
+        ranged.style.transform = `translateX(${destination + Math.min(115, window.innerWidth * .12)}px)`;
+    }, 60);
+    opacityTimeout = setTimeout(() => {
+        melee.style.opacity = '0';
+        ranged.style.opacity = '0';
+        creepAnimationIndicator.value = false;
+    }, 2750);
+
+    onCleanup(() => {
+        if (approachCreepsTimeout) clearTimeout(approachCreepsTimeout);
+        if (opacityTimeout) clearTimeout(opacityTimeout);
+        approachCreepsTimeout = null;
+        opacityTimeout = null;
+        melee.style.opacity = '0';
+        ranged.style.opacity = '0';
+    });
+}, { flush: 'post' });
 
 watchEffect(() => {
     if ((isRegistered.value && levels.value.length >= 1 || previewClosedIndicator.value) && myCharacter.value && currentUserAction.value !== 'go') {
         previewClosedIndicator.value = false;
         setTimeout(() => {
             calcCharacterPosition();
-            calcScrollPosition();
+            // Don't yank the camera back while a visitor explores the full map.
+            if (!DEMO_MODE) calcScrollPosition();
         }, 2000);
     }
 })
@@ -543,6 +644,13 @@ watchEffect(() => {
 })
 
 const checkUserAction = (onRegister: boolean): void => {
+    if (DEMO_MODE) {
+        currentUserAction.value = demoAction(
+            fightEvents.value, activeEventLevel.value, user.value.level,
+            completedEventLevels.value
+        );
+        return;
+    }
     if (!currentEvent.value) {
         if (!onRegister && currentUserAction.value !== 'go') {
             currentUserAction.value = 'farm';
@@ -578,78 +686,45 @@ const checkUserAction = (onRegister: boolean): void => {
     }
 }
 
-watchEffect(() => {
-    if (currentUserAction.value === 'go') {
-        promptWrapper.value?.classList.add('closed');
-        return;
+// Tutorial text follows the encounter where the hero actually stands, not XP level.
+// The two values can diverge after a high roulette reward.
+const activeHelpPrompt = computed<number | null>(() => {
+    if (isHelpDismissed.value || currentUserAction.value === 'go') return null;
+
+    if (DEMO_MODE) {
+        if (!isViewingTutorialArea.value) return null;
+        if (activeEventLevel.value === 1) {
+            if (currentUserAction.value === 'getFreeSpins') return 1;
+            if (currentUserAction.value === 'farm') return 2;
+        }
+        if (activeEventLevel.value === 3 && currentUserAction.value === 'getRunes') return 4;
+        return null;
     }
 
+    // Retain the archived game's original guidance outside demo mode.
     if (!isRegistered.value) {
-        if (user.value.level === 1 && currentUserAction.value === 'getFreeSpins') {
-            promptWrapper.value?.classList.remove('closed');
-            prompt1.value?.classList.remove('closed')
-        } else {
-            prompt1.value?.classList.add('closed');
-        }
-        if (user.value.level === 2 || user.value.level === 1 && currentUserAction.value === 'farm') {
-            promptWrapper.value?.classList.remove('closed');
-            prompt2.value?.classList.remove('closed');
-        } else {
-            prompt2.value?.classList.add('closed');
-        }
-        if (user.value.level === 3) {
-            promptWrapper.value?.classList.remove('closed');
-            prompt4.value?.classList.remove('closed');
-        } else {
-            prompt4.value?.classList.add('closed');
-        }
-        if (user.value.level === 4) {
-            promptWrapper.value?.classList.remove('closed');
-            prompt5.value?.classList.remove('closed');
-        } else {
-            prompt5.value?.classList.add('closed');
-        }
-    } else {
-        promptWrapper.value?.classList.add('closed');
-        if (user.value.level === 1 && currentUserAction.value === 'getFreeSpins' && (currentLevelObject.value && user.value.points - currentLevelObject.value.points <= 150) && freeSpinsSpins.value) {
-            promptWrapper.value?.classList.remove('closed');
-            prompt1.value?.classList.remove('closed')
-        } else {
-            prompt1.value?.classList.add('closed');
-        }
-
-        if (user.value.level === 1 && currentUserAction.value === 'farm' && (currentLevelObject.value && user.value.points - currentLevelObject.value.points <= 150) && attackFarmSpins.value) {
-            promptWrapper.value?.classList.remove('closed');
-            prompt2.value?.classList.remove('closed');
-        } else {
-            prompt2.value?.classList.add('closed');
-        }
-
-        if (user.value.level === 3 && (currentLevelObject.value && user.value.points - currentLevelObject.value.points <= 150) && runesSpins.value) {
-            promptWrapper.value?.classList.remove('closed');
-            prompt4.value?.classList.remove('closed');
-        } else {
-            prompt4.value?.classList.add('closed');
-        }
-        
-        if (user.value.level === 13 && (currentLevelObject.value && user.value.points - currentLevelObject.value.points <= 150) && attackFarmSpins.value) {
-            promptWrapper.value?.classList.remove('closed');
-            prompt6.value?.classList.remove('closed');
-        } else {
-            prompt6.value?.classList.add('closed');
-        }
-        
-        if (user.value.level === 24 && (currentLevelObject.value && user.value.points - currentLevelObject.value.points <= 150) && attackFarmSpins.value) {
-            promptWrapper.value?.classList.remove('closed');
-            prompt7.value?.classList.remove('closed');
-        } else {
-            prompt7.value?.classList.add('closed');
-        }
+        if (user.value.level === 1 && currentUserAction.value === 'getFreeSpins') return 1;
+        if (user.value.level === 2 || (user.value.level === 1 && currentUserAction.value === 'farm')) return 2;
+        if (user.value.level === 3) return 4;
+        if (user.value.level === 4) return 5;
+        return null;
     }
-})
 
-watch(currentEvent, (newValue) => {
-    checkUserAction(false);
+    const nearStartOfLevel = currentLevelObject.value &&
+        user.value.points - currentLevelObject.value.points <= 150;
+    if (!nearStartOfLevel) return null;
+    if (user.value.level === 1 && currentUserAction.value === 'getFreeSpins' && freeSpinsSpins.value) return 1;
+    if (user.value.level === 1 && currentUserAction.value === 'farm' && attackFarmSpins.value) return 2;
+    if (user.value.level === 3 && runesSpins.value) return 4;
+    if (user.value.level === 13 && attackFarmSpins.value) return 6;
+    if (user.value.level === 24 && attackFarmSpins.value) return 7;
+    return null;
+});
+
+watch(currentEvent, () => {
+    // In demo mode the arrival animation owns this transition. It must not
+    // change Go into Attack while the hero is still walking to the enemy.
+    if (!DEMO_MODE) checkUserAction(false);
 })
 
 watch(isRegistered, (newValue) => {
@@ -702,88 +777,143 @@ watchEffect(() => {
     }, 300);
 })
 
-onMounted(() => {
-    if (window.outerWidth < 850) {
-        screenScrollTime.value = 1400;
-    }
+// Register document-level drag/scroll listeners only while the game is mounted.
+// Previously these listeners accumulated after visiting FAQ/Tasks and returning.
+let isDragging = false;
+let startDragX = 0;
+let scrollLeftAtDragStart = 0;
 
+const onMapMouseDown = (event: MouseEvent): void => {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.closest('.main-map') ||
+        target.closest('button, a, input')) return;
+    isDragging = true;
+    stopDemoCamera();
+    document.body.classList.add('body-grabbing');
+    startDragX = event.pageX - document.body.offsetLeft;
+    scrollLeftAtDragStart = document.body.scrollLeft;
+};
+
+const finishMapDrag = (): void => {
+    isDragging = false;
+    document.body.classList.remove('body-grabbing');
+};
+
+const onMapMouseMove = (event: MouseEvent): void => {
+    if (!isDragging) return;
+    event.preventDefault();
+    const distance = (event.pageX - document.body.offsetLeft - startDragX) * 1.25;
+    document.body.scrollLeft = scrollLeftAtDragStart - distance;
+    if (scrollingAnimationIndicator.value) stopScrollingAnimationIndicator.value = true;
+};
+
+const onMapTouchMove = (): void => {
+    if (scrollingAnimationIndicator.value) stopScrollingAnimationIndicator.value = true;
+};
+
+const onMapWheel = (event: WheelEvent): void => {
+    if (event.ctrlKey) return;
+    if (!(event.target instanceof Element) || !event.target.closest('.main-map')) return;
+    if (scrollingAnimationIndicator.value) stopScrollingAnimationIndicator.value = true;
+    stopDemoCamera();
+    document.body.scrollLeft = gsap.utils.interpolate(
+        document.body.scrollLeft,
+        document.body.scrollLeft + event.deltaY + event.deltaX,
+        .65
+    );
+};
+
+const updateMapMeasurements = (): void => {
+    if (!whiteLocation.value) return;
+    halfWidth.value = window.innerWidth / 2;
+    locationScrollWidth.value = whiteLocation.value.clientWidth - window.innerWidth;
+    percentStep.value = locationScrollWidth.value / 100;
+};
+
+onMounted(() => {
+    if (DEMO_MODE) {
+        try {
+            isHelpDismissed.value = window.sessionStorage.getItem(helpDismissalKey) === '1';
+        } catch {
+            // The demo remains functional when storage is blocked.
+        }
+    }
+    if (window.innerWidth < 850) screenScrollTime.value = 1400;
     if (levels.value.length >= 1) {
         calcCharacterPosition();
         calcScrollPosition();
     }
-
     checkUserAction(false);
 
-
-    let isDown = false;
-    let startX = 0;
-    let scrollLeft = 0;
-
-    document.body.addEventListener('mousedown', (event: MouseEvent) => {
-        isDown = true;
-        document.body.classList.add('body-grabbing');
-        startX = event.pageX - document.body.offsetLeft;
-        scrollLeft = document.body.scrollLeft;
-    });
-
-    document.body.addEventListener('mouseleave', () => {
-        isDown = false;
-        document.body.classList.remove('body-grabbing');
-    });
-
-    document.body.addEventListener('mouseup', () => {
-        isDown = false;
-        document.body.classList.remove('body-grabbing');
-    });
-
-    document.body.addEventListener('mousemove', (event: MouseEvent) => {
-        if(!isDown) return;
-        event.preventDefault();
-        const x = event.pageX - document.body.offsetLeft;
-        const walk = (x - startX) * 1.25;
-        document.body.scrollLeft = scrollLeft - walk;
-
-        if (scrollingAnimationIndicator.value) {
-            stopScrollingAnimationIndicator.value = true;
-        }
-    });
-
-    document.body.addEventListener('touchmove', () => {
-        if (scrollingAnimationIndicator.value) {
-            stopScrollingAnimationIndicator.value = true;
-        }
-    })
-
     if (isTouchDevice()) {
-        polyfillIndex.value = 0.15;
+        polyfillIndex.value = .15;
         backLayerFormulaIndex.value = 9;
         foregroundLayerFormulaIndex.value = 20;
     }
+    updateMapMeasurements();
+    updateTutorialVisibility();
 
-    halfWidth.value = window.outerWidth / 2;
-    locationScrollWidth.value = whiteLocation.value!.clientWidth - window.outerWidth;
-    percentStep.value = (locationScrollWidth.value) / 100;
-
-    document.body.addEventListener('wheel', (event: WheelEvent) => {
-        if (scrollingAnimationIndicator.value) {
-            stopScrollingAnimationIndicator.value = true;
-        }
-        document.body.scrollLeft = gsap.utils.interpolate(document.body.scrollLeft, document.body.scrollLeft + event.deltaY + event.deltaX, .65); 
-    });
-
+    document.body.addEventListener('scroll', updateTutorialVisibility);
+    window.addEventListener('resize', updateTutorialVisibility);
+    document.body.addEventListener('mousedown', onMapMouseDown);
+    document.body.addEventListener('mouseleave', finishMapDrag);
+    document.body.addEventListener('mouseup', finishMapDrag);
+    document.body.addEventListener('mousemove', onMapMouseMove);
+    document.body.addEventListener('touchmove', onMapTouchMove);
+    document.body.addEventListener('wheel', onMapWheel);
     document.body.addEventListener('scroll', calcParallaxPosition);
-})
+    window.addEventListener('resize', updateMapMeasurements);
+});
+
+onUnmounted(() => {
+    stopScrollingAnimationIndicator.value = true;
+    stopDemoCamera();
+    if (finishGoTimeout) clearTimeout(finishGoTimeout);
+    if (approachCreepsTimeout) clearTimeout(approachCreepsTimeout);
+    if (opacityTimeout) clearTimeout(opacityTimeout);
+    finishMapDrag();
+    document.body.removeEventListener('scroll', updateTutorialVisibility);
+    window.removeEventListener('resize', updateTutorialVisibility);
+    document.body.removeEventListener('mousedown', onMapMouseDown);
+    document.body.removeEventListener('mouseleave', finishMapDrag);
+    document.body.removeEventListener('mouseup', finishMapDrag);
+    document.body.removeEventListener('mousemove', onMapMouseMove);
+    document.body.removeEventListener('touchmove', onMapTouchMove);
+    document.body.removeEventListener('wheel', onMapWheel);
+    document.body.removeEventListener('scroll', calcParallaxPosition);
+    window.removeEventListener('resize', updateMapMeasurements);
+});
 </script>
 
 <template>
-    <div ref="gamePage" :class="{'no-login': !isRegistered}" class="game-page">
+    <div ref="gamePage" :class="{'no-login': !isRegistered && !DEMO_MODE}" class="game-page">
+        <nav v-if="DEMO_MODE" class="demo-map-navigation" aria-label="Explore map regions">
+            <button
+                type="button"
+                class="demo-map-navigation__toggle"
+                :aria-expanded="isRegionMenuOpen"
+                aria-controls="demo-map-region-list"
+                @click="isRegionMenuOpen = !isRegionMenuOpen"
+            >Explore map <span aria-hidden="true">{{ isRegionMenuOpen ? '−' : '+' }}</span></button>
+            <div v-if="isRegionMenuOpen" id="demo-map-region-list" class="demo-map-navigation__regions">
+                <button
+                    v-for="region in demoRegions"
+                    :key="region.id"
+                    type="button"
+                    class="demo-map-navigation__button"
+                    @click="goToRegion(region.progress)"
+                >{{ region.label }}</button>
+            </div>
+        </nav>
         <RotateScreen />
         <RouletteScreen />
         <AwardsScreen />
-        <RegistrationAwardWindow v-if="!isRegistered" />
+        <RegistrationAwardWindow v-if="!isRegistered && !DEMO_MODE" />
 
-        <div ref="promptWrapper" class="prompts-wrapper">
-            <div ref="prompt1" class="closed prompt prompt-1">
+        <Teleport to="body">
+        <div v-if="activeHelpPrompt !== null" class="prompts-wrapper" :class="{'prompts-wrapper--combat': currentUserAction === 'attack'}">
+            <button v-if="DEMO_MODE" type="button" class="prompts-wrapper__close" aria-label="Dismiss game tip" @click.stop.prevent="dismissHelp">×</button>
+            <div v-if="activeHelpPrompt === 1" class="prompt prompt-1">
                 <img src="/prompts/prompt1.png" alt="" class="prompt__image">
                 <p class="prompt__description">
                     <!-- Добро пожаловать в <strong>DOTA BOOM</strong>! Нажми <strong>«Получить»</strong>, чтобы начать играть. -->
@@ -791,7 +921,7 @@ onMounted(() => {
                 </p>
             </div>
 
-            <div ref="prompt2" class="closed prompt prompt-2">
+            <div v-if="activeHelpPrompt === 2" class="prompt prompt-2">
                 <img src="/prompts/prompt2.png" alt="" class="prompt__image">
                 <p class="prompt__description">
                     <!-- Это <strong>фарм</strong>. Получай <strong>опыт</strong>, чтобы перейти на следующий уровень. -->
@@ -799,7 +929,7 @@ onMounted(() => {
                 </p>
             </div>
 
-            <div ref="prompt3" class="closed prompt prompt-3">
+            <div v-if="activeHelpPrompt === 3" class="prompt prompt-3">
                 <img src="/prompts/prompt3.png" alt="" class="prompt__image">
                 <p class="prompt__description">
                     <!-- Это <strong>дружеская башня</strong>. Она дает бесплатные <strong>ходы</strong>. -->
@@ -807,7 +937,7 @@ onMounted(() => {
                 </p>
             </div>
 
-            <div ref="prompt4" class="closed prompt prompt-4">
+            <div v-if="activeHelpPrompt === 4" class="prompt prompt-4">
                 <img src="/prompts/prompt4.png" alt="" class="prompt__image">
                 <p class="prompt__description">
                     <!-- Это <strong>руна</strong>. Она дает <strong>бонусы</strong>. -->
@@ -815,7 +945,7 @@ onMounted(() => {
                 </p>
             </div>
 
-            <div ref="prompt5" class="closed prompt prompt-5">
+            <div v-if="activeHelpPrompt === 5" class="prompt prompt-5">
                 <img src="/prompts/prompt5.png" alt="" class="prompt__image">
                 <p class="prompt__description">
                     <!-- Это <strong>вражеский герой</strong>. Срази его и получи <strong>награду</strong>. -->
@@ -823,7 +953,7 @@ onMounted(() => {
                 </p>
             </div>
 
-            <div ref="prompt6" class="closed prompt prompt-6">
+            <div v-if="activeHelpPrompt === 6" class="prompt prompt-6">
                 <img src="/prompts/prompt6.png" alt="" class="prompt__image">
                 <p class="prompt__description">
                     <!-- Это <strong>вражеская башня</strong>. Уничтожь её и получи <strong>награду</strong>. -->
@@ -831,7 +961,7 @@ onMounted(() => {
                 </p>
             </div>
 
-            <div ref="prompt7" class="closed prompt prompt-7">
+            <div v-if="activeHelpPrompt === 7" class="prompt prompt-7">
                 <img src="/prompts/prompt7.png" alt="" class="prompt__image">
                 <p class="prompt__description">
                     <!-- Ты добрался до <strong>Трона</strong>! Уничтожь его, чтобы пройти <strong>игру</strong>. -->
@@ -839,9 +969,10 @@ onMounted(() => {
                 </p>
             </div>
         </div>
+        </Teleport>
         
         <div class="inner-container">
-            <HpContainer v-if="currentEvent?.hp && currentUserAction !== 'go'"
+            <HpContainer v-if="currentEvent?.hp && currentUserAction !== 'go' && (!DEMO_MODE || (currentUserAction === 'attack' && !completedEventLevels.includes(activeEventLevel)))"
                 :currentEvent="currentEvent"
                 :currentLevel="currentLevelObject"
                 :prevLevel="prevLevelObject"
@@ -878,28 +1009,28 @@ onMounted(() => {
                 <div class="foreground-layer-container white-location__foreground-layer-container">
                     <img ref="whiteLayerForeground" src="@/assets/img/map/1.Radiant/Foreground.png" class="layer foreground-layer">
                 </div>
-                <img v-if="isRegistered" src="@/assets/img/map/1.Divider.png" alt="" class="divider divider-1">
-                <div v-if="isRegistered" class="location river-location">
+                <img v-if="isRegistered || DEMO_MODE" src="@/assets/img/map/1.Divider.png" alt="" class="divider divider-1">
+                <div v-if="isRegistered || DEMO_MODE" class="location river-location">
                     <div ref="riverLayerBack" class="layer base-layer"></div>
                     <div class="layer front-layer"></div>
                 </div>
-                <div v-if="isRegistered" class="foreground-layer-container river-location__foreground-layer-container">
+                <div v-if="isRegistered || DEMO_MODE" class="foreground-layer-container river-location__foreground-layer-container">
                     <img ref="riverLayerForeground" src="@/assets/img/map/2.River/Foreground.png" class="layer foreground-layer">
                 </div>
-                <img v-if="isRegistered" src="@/assets/img/map/2.Divider.png" alt="" class="divider divider-2">
-                <div v-if="isRegistered" class="location red-location">
+                <img v-if="isRegistered || DEMO_MODE" src="@/assets/img/map/2.Divider.png" alt="" class="divider divider-2">
+                <div v-if="isRegistered || DEMO_MODE" class="location red-location">
                     <div ref="redLayerBack" class="layer base-layer"></div>
                     <div class="layer front-layer"></div>
                 </div>
-                <div v-if="isRegistered" class="foreground-layer-container red-location__foreground-layer-container">
+                <div v-if="isRegistered || DEMO_MODE" class="foreground-layer-container red-location__foreground-layer-container">
                     <img ref="redLayerForeground" src="@/assets/img/map/3.Dire/Foreground.png" class="layer foreground-layer">
                 </div>
-                <img v-if="isRegistered" src="@/assets/img/map/3.Divider.png" alt="" class="divider divider-3">
-                <div v-if="isRegistered" class="location black-location">
+                <img v-if="isRegistered || DEMO_MODE" src="@/assets/img/map/3.Divider.png" alt="" class="divider divider-3">
+                <div v-if="isRegistered || DEMO_MODE" class="location black-location">
                     <div ref="blackLayerBack" class="layer base-layer"></div>
                     <div class="layer front-layer"></div>
                 </div>
-                <div v-if="isRegistered" class="foreground-layer-container black-location__foreground-layer-container">
+                <div v-if="isRegistered || DEMO_MODE" class="foreground-layer-container black-location__foreground-layer-container">
                     <img ref="blackLayerForeground" src="@/assets/img/map/4.DireTop/Foreground.png" class="layer foreground-layer">
                 </div>
             </div>
@@ -912,6 +1043,189 @@ onMounted(() => {
 </template>
 
 <style lang="scss" scoped>
+.demo-map-navigation {
+    position: fixed;
+    bottom: 5rem;
+    left: 1rem;
+    z-index: 9500;
+    max-width: calc(100vw - 2rem);
+    font-family: 'Gilroy', sans-serif;
+
+    &__toggle,
+    &__button {
+        min-height: 2.8rem;
+        border: .1rem solid rgba(255, 255, 255, .2);
+        border-radius: .5rem;
+        color: #eaeaea;
+        background: rgba(25, 26, 30, .95);
+        font-family: inherit;
+        font-size: 1rem;
+        font-weight: 700;
+        cursor: pointer;
+        transition: background .2s, border-color .2s;
+
+        &:hover,
+        &:focus-visible {
+            border-color: #4cdc58;
+            background: rgba(45, 65, 48, .96);
+        }
+    }
+
+    &__toggle {
+        display: flex;
+        align-items: center;
+        gap: .7rem;
+        padding: .5rem .9rem;
+        box-shadow: 0 .5rem 2rem rgba(0, 0, 0, .4);
+    }
+
+    &__regions {
+        position: absolute;
+        left: 0;
+        bottom: calc(100% + .5rem);
+        display: flex;
+        flex-direction: column;
+        gap: .4rem;
+        padding: .5rem;
+        border: .1rem solid rgba(255, 255, 255, .2);
+        border-radius: .7rem;
+        background: rgba(25, 26, 30, .96);
+        box-shadow: 0 .5rem 2rem rgba(0, 0, 0, .4);
+    }
+
+    &__button {
+        min-width: 7rem;
+        padding: .5rem .8rem;
+        text-align: left;
+    }
+
+    @media only screen and (max-width: 850px) {
+        top: max(.5rem, env(safe-area-inset-top));
+        right: .5rem;
+        bottom: auto;
+        left: auto;
+
+        &__regions {
+            right: 0;
+            left: auto;
+            top: calc(100% + .5rem);
+            bottom: auto;
+        }
+
+        &__toggle,
+        &__button {
+            font-size: .95rem;
+        }
+    }
+
+    @media only screen and (max-height: 550px) {
+        &__regions {
+            max-height: 55vh;
+            overflow-y: auto;
+        }
+    }
+}
+
+.prompts-wrapper {
+    position: fixed;
+    top: 7rem;
+    left: 0;
+    transition: all .2s;
+    width: 100%;
+    height: 7rem;
+    z-index: 9000;
+    pointer-events: none;
+
+    &--combat {
+        top: 13rem;
+    }
+
+    &__close {
+        position: absolute;
+        z-index: 2;
+        top: -.3rem;
+        right: max(.8rem, calc(50% - 17rem));
+        width: 2rem;
+        height: 2rem;
+        border: .1rem solid rgba(255, 255, 255, .35);
+        border-radius: 50%;
+        color: #fff;
+        background: #25262b;
+        font-size: 1.4rem;
+        cursor: pointer;
+        pointer-events: auto;
+    }
+
+    @media only screen and (max-width: 850px) {
+        top: 4.5rem;
+        &--combat { top: 4.5rem; }
+    }
+
+    .prompt {
+        @include abs-center;
+        @include textureBackground;
+        @include flex-center;
+        top: 1rem;
+        justify-content: flex-end;
+        transform: translateX(-50%);
+        width: min(34rem, calc(100vw - 2rem));
+        height: 6.4rem;
+        z-index: 1;
+        padding: .6rem;
+        transition: all .2s;
+        border-top-left-radius: 20px;;
+        border-bottom-left-radius: 20px;;
+
+        @media only screen and (min-width: 850px) {
+            top: .5rem;
+            width: min(35rem, calc(100vw - 2rem));
+            height: 5.6rem;
+        }
+
+        &__image {
+            position: absolute;
+            top: -.8rem;
+            left: -1.2rem;
+            width: 8rem;
+            height: 8rem;
+            margin-right: .8rem;
+        }
+
+        &__description {
+            font-size: 1.4rem;
+            width: calc(100% - 8rem);
+
+            @media only screen and (min-width: 850px) {
+                width: calc(100% - 8rem);
+                font-size: 16px;
+            }
+        }
+    }
+    @media only screen and (max-width: 600px) {
+        .prompt {
+            width: min(31rem, calc(100vw - 1rem));
+            min-height: 5.6rem;
+            height: auto;
+            padding: .5rem .8rem .5rem 5.5rem;
+
+            &__image {
+                top: 0;
+                left: -.3rem;
+                width: 5.5rem;
+                height: 5.5rem;
+            }
+
+            &__description {
+                width: 100%;
+                font-size: 1rem;
+                line-height: 1.3;
+            }
+        }
+    }
+
+}
+
+
 .game-page.no-login {
     width: 400vh !important;
 
@@ -951,58 +1265,6 @@ onMounted(() => {
 
         @media only screen and (min-width: 850px) {
             bottom: 0;
-        }
-    }
-
-    .prompts-wrapper {
-        position: fixed;
-        top: 0;
-        left: 0;
-        transition: all .2s;
-        width: 100%;
-        height: 14rem;
-        z-index: 50000;
-        background: linear-gradient(180deg, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.504) 48.68%, rgba(47, 52, 56, 0) 100%);
-    
-        .prompt {
-            @include abs-center;
-            @include textureBackground;
-            @include flex-center;
-            top: 25%;
-            justify-content: flex-end;
-            transform: translateX(-50%);
-            width: 34rem;
-            height: 6.4rem;
-            z-index: 100000;
-            padding: .6rem;
-            transition: all .2s;
-            border-top-left-radius: 20px;;
-            border-bottom-left-radius: 20px;;
-
-            @media only screen and (min-width: 850px) {
-                top: 2rem;
-                width: 35rem;
-                height: 5.6rem;
-            }
-
-            &__image {
-                position: absolute;
-                top: -.8rem;
-                left: -1.2rem;
-                width: 8rem;
-                height: 8rem;
-                margin-right: .8rem;
-            }
-
-            &__description {
-                font-size: 1.4rem;
-                width: 26rem;
-
-                @media only screen and (min-width: 850px) {
-                    width: 26.5rem;
-                    font-size: 16px;
-                }
-            }
         }
     }
 

@@ -1,53 +1,60 @@
+# Dota Battlepass - Frontend Demo
 
-# Dota Battlepass
+An archived Dota-inspired interactive game frontend built using **Vue 3, TypeScript, Pinia, GSAP, SCSS and Vite**.
 
-An interactive frontend for a Dota-themed gaming website, built with Vue 3 and TypeScript.
+The original experience included an animated scrolling map, characters, encounters, roulette interactions, a progression system, tasks and user-account screens. The original promotional backend is no longer part of this standalone portfolio demo.
 
-**Live demo:** https://project-dota-battlepass.vercel.app/
+## Explore the demo
 
-I worked on the frontend, implementing interactive pages, animations and application functionality. The project involved building the UI, managing application state and integrating frontend components with backend APIs.
+- **Game:** the complete original four-region map (Radiant, River, Dire and Ancient), with 13 local encounters and 25 fictional progression stages. Use the new region navigation to jump between areas, or scroll/drag horizontally.
+- **Tasks:** an interactive local exploration checklist (not real missions)
+- **Account:** a read-only summary of the local game state
+- **FAQ:** questions about this frontend project and its limitations
+- **About:** explains the archived experience and which integrations are unavailable
 
-## Tech stack
-
-- Vue 3
-- TypeScript
-- Vite
-- SCSS
-- Pinia
-- Axios
-- GSAP
-
-## Features
-
-- Interactive gaming-themed interface
-- Animations and transitions using GSAP
-- Reusable Vue components
-- Client-side routing with Vue Router
-- State management with Pinia
-- API integration using Axios
+The entire map is available without signing in. The original backend-driven progression and reward system are **not** restored; stages, points, spins and events are fictional local demo data. **There are no active prizes, accounts, payments, bets or redemption flows**.
 
 ## Running locally
 
-You'll need Node.js and npm installed.
+Requires a current supported Node.js version and npm.
 
 ```bash
-git clone https://github.com/OleksiiReznichenko/Project-DotaBattlepass.git
-cd Project-DotaBattlepass
 npm install
 npm run dev
 ```
 
-Vite will display the local development URL in the terminal.
-
-To create a production build:
+To produce a static build:
 
 ```bash
 npm run build
 npm run preview
 ```
 
-## Project status
+The build output is `dist/`. On Vercel, `vercel.json` provides an SPA fallback for client-side routes. For Cloudflare Pages, `public/_redirects` serves the same purpose.
 
-This is an archived frontend project from previous client work.
+## Demo mode and API integrations
 
-The demo showcases the interface and animations. Some features may depend on external backend services that are no longer available.
+Public demo mode is **enabled by default** in `src/demo/config.ts`:
+
+```ts
+export const DEMO_MODE: boolean = import.meta.env.VITE_DEMO_MODE !== 'false';
+```
+
+In this mode, legacy login messages, API requests and tracking are disabled. The `src/services/api` directory and the original Pinia integration code remain in the repository as historical frontend implementation, but aren't used by the public visitor journey.
+
+`VITE_DEMO_MODE=false` is intended **only for private testing with a compatible original backend** and must not be set on a public deployment. Such private testing additionally requires a trusted `VITE_PARENT_ORIGIN` for the original embedding protocol. No API credentials should be placed in public Vite environment variables.
+
+## Project structure
+
+- `src/pages/Index.vue` - animated map and original game
+- `src/demo/DemoPage.vue` - demo Tasks, Account, FAQ and About pages
+- `src/stores/` - state and local game data
+- `src/services/` - original API integration source, disabled in demo mode
+- `src/components/` - characters, animations and interface components
+- `public/`, `src/assets/` - original image, sprite and styling assets
+
+## Notes
+
+This is an older client frontend project restored for portfolio purposes, not a production game. The original map art and animations are preserved, but not every historical gameplay/reward sequence has been verified. Test the four region buttons, clicking event markers, mousewheel and drag scrolling, and mobile layouts. Demo progress is temporary and does not correspond to real prizes or activities.
+
+The downloadable code-only snapshot omits original font binaries. When applying it to your original project, **keep your own authorized local font files** and other assets in place.

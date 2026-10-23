@@ -2,7 +2,9 @@
 import { computed, onMounted, ref, watch, watchEffect } from "vue";
 import { storeToRefs } from "pinia";
 import { useUserStore } from '@/stores/user';
+import { useBaseStore } from '@/stores/index';
 import { useAuthStore } from '@/stores/auth';
+import { DEMO_MODE } from '@/demo/config';
 import { useEventsStore } from '@/stores/events';
 import type Award from "@/interfaces/award";
 import type Sprite from "@/interfaces/sprite";
@@ -26,6 +28,9 @@ interface Props {
 
 const props = defineProps<Props>();
 
+const baseStore = useBaseStore();
+const { activeEventLevel, completedEventLevels, eventAction } = storeToRefs(baseStore);
+
 const userStore = useUserStore();
 const { user } = storeToRefs(userStore);
 
@@ -37,7 +42,7 @@ const { fightEvents, prizesForLevels, allPrizes } = storeToRefs(eventsStore);
 
 const currentEvent = computed(() => {
     return fightEvents.value.find(el => {
-        return el.userLevel === user.value.level;
+        return el.userLevel === (DEMO_MODE ? activeEventLevel.value : user.value.level);
     })
 });
 
@@ -120,7 +125,20 @@ const showAwards = computed(() => {
     }
 });
 
+const eventCompleted = computed(() => DEMO_MODE && completedEventLevels.value.includes(props.userLevel));
+const completedEnemy = computed(() => eventCompleted.value &&
+    ['Rune', 'Outworld Destroyer', 'Chaos Knight', 'Shadow Fiend'].includes(props.name) &&
+    // Let an enemy play its damage/death sequence before hiding the canvas.
+    (props.userLevel !== activeEventLevel.value || eventAction.value === 'idle'));
+
+const completedLabel = computed(() => {
+    if (props.name === 'Rune') return 'Collected';
+    if (props.name === 'Tower Radiant') return 'Visited';
+    return 'Cleared';
+});
+
 const showName = computed(() => {
+    if (DEMO_MODE) return true;
     if (props.userLevel === user.value.level) {
         if (window.outerWidth > 850 || window.outerWidth <= 850 && window.outerHeight > 600) {
             return true;
@@ -138,7 +156,7 @@ onMounted(() => {
 </script>
 
 <template>
-    <div :class="icon.toLowerCase(), 'event-' + index, {'no-login': !isRegistered}" class="event">
+    <div :class="[icon.toLowerCase(), `event-${index}`, { 'no-login': !isRegistered && !DEMO_MODE }]" class="event">
         <!-- :style="{'left': eventLeftPosition + '%'}" -->
         <div v-if="showAwards" class="awards-container">
             <div class="background"></div>
@@ -166,11 +184,11 @@ onMounted(() => {
                 </div>
             </div>
         </div>
-        <div v-if="showName" class="title-container">
+        <div v-if="showName" class="title-container" :class="{'title-container--completed': eventCompleted}">
             <img :src="'/characterIcons/' + icon + '.png'" alt="" class="event-icon">
-            <span class="title">{{name}}</span>
+            <span class="title">{{name}}<small v-if="eventCompleted" class="event-status">{{ completedLabel }}</small></span>
         </div>
-        <div v-if="sprites" class="image-container">
+        <div v-if="sprites && !completedEnemy" class="image-container">
             <div v-if="name === 'Rune'" class="event-image">
                 <Runes 
                     :index="index"
@@ -225,7 +243,7 @@ onMounted(() => {
             <!-- <img v-if="name !== 'Rune' && name !== 'Outworld Destroyer' && name !== 'Chaos Knight'" :src="'/events/' + icon + '.png'" alt="" class="event-image"> -->
             <!-- <img :src="'/events/' + icon + '.png'" alt="" class="event-image"> -->
         </div>
-        <div v-else class="image-container">
+        <div v-else-if="!sprites" class="image-container">
             <TowerRadiant v-if="name === 'Tower Radiant'" />
         </div>
     </div>
@@ -367,6 +385,32 @@ onMounted(() => {
 
         .title {
             text-shadow: 0px 2px 4px #000000;
+        }
+
+        .event-status {
+            display: block;
+            margin-top: .2rem;
+            color: #b4c8ad;
+            font-family: 'Gilroy', sans-serif;
+            font-size: .85rem;
+            font-weight: 500;
+            text-align: center;
+        }
+
+        &--completed {
+            opacity: .8;
+        }
+
+        @media only screen and (max-width: 850px) {
+            .title {
+                font-size: 1.1rem;
+            }
+
+            .event-icon {
+                width: 1.7rem;
+                height: 1.7rem;
+                object-fit: contain;
+            }
         }
         
         .event-icon {

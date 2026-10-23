@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch, watchEffect } from 'vue';
+import { DEMO_MODE } from '@/demo/config';
+import { demoAction, nextUnlockedEncounter, xpLevelForPoints } from '@/demo/progression';
+import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue';
 import { storeToRefs } from "pinia";
 import { useBaseStore } from '@/stores/index';
 import { useUserStore } from '@/stores/user';
@@ -12,7 +14,7 @@ import { RouletteType } from '@/services/api/roulette';
 
 const baseStore = useBaseStore();
 const { 
-    isRouletteWindowOpened, currentUserAction, rouletteGottenValue, isAwardsWindowOpened, 
+    activeEventLevel, completedEventLevels, isRouletteWindowOpened, currentUserAction, rouletteGottenValue, isAwardsWindowOpened,
     skipScrollIndicator, myCharacterAction, creepAnimationIndicator, updateProgressBarPositionIndicator,
     goToNextEvent, eventAction, allowToOpenRoulette
     } = storeToRefs(baseStore);
@@ -103,52 +105,160 @@ const skipScroll = (): void => {
     skipScrollIndicator.value = true;
 };
 
-let timeout1 = ref<any>(null);
-let timeout2 = ref<any>(null);
-let timeout3 = ref<any>(null);
-let timeoutCloseWindow = ref<any>(null);
+// Only one group of timers may control a spin. Reactive watchEffect used to
+// create overlapping timers when users clicked quickly or state changed.
+const spinTimers: ReturnType<typeof setTimeout>[] = [];
+let resultUnlockTimer: ReturnType<typeof setTimeout> | null = null;
+let resultApplyTimer: ReturnType<typeof setTimeout> | null = null;
 
-watchEffect(() => {
-    if (answerSuccess.value === false) {
-        isRouletteWindowOpened.value = false;
-        answerSuccess.value = null;
-        return;
-    }
-    if (!winId.value && isRegistered.value) return;
-    if (skipScrollIndicator.value) {
-        clearTimeout(timeout1.value);
-        clearTimeout(timeout2.value);
-        clearTimeout(timeout3.value);
-        showAwardIndicator.value = true;
-        removeClosedIndicator.value = true;
-        timeoutCloseWindow.value = setTimeout(() => {
-            if (isRouletteWindowOpened.value) {
-                closeWindow();
-            }
-            timeoutCloseWindow.value = null;
-        }, 1500);
-        return;
-    }
-    if (!isRouletteWindowOpened.value) return;
-    // removeClosedIndicator.value = false;
-    timeout1.value = setTimeout(() => {
-        if (isRouletteWindowOpened.value) {
-            showAwardIndicator.value = true;            
+const clearSpinTimers = (): void => {
+    spinTimers.forEach(clearTimeout);
+    spinTimers.length = 0;
+};
+
+watch([isRouletteWindowOpened, skipScrollIndicator, winId, answerSuccess],
+    ([opened, skipped, winningId, success]) => {
+        if (DEMO_MODE) return;
+        clearSpinTimers();
+        if (success === false) {
+            isRouletteWindowOpened.value = false;
+            answerSuccess.value = null;
+            return;
         }
-        timeout1.value = null;
-    }, 4500);
-    timeout2.value = setTimeout(() => {
-        if (isRouletteWindowOpened.value) {
+        if (!opened || (isRegistered.value && !winningId)) return;
+
+        if (skipped) {
+            showAwardIndicator.value = true;
             removeClosedIndicator.value = true;
+            spinTimers.push(setTimeout(closeWindow, 1400));
+            return;
         }
-        timeout2.value = null;
-    }, 4600);
-    timeout3.value = setTimeout(() => {
-        if (isRouletteWindowOpened.value) {
-            closeWindow();
+
+        spinTimers.push(setTimeout(() => { showAwardIndicator.value = true; }, 4500));
+        spinTimers.push(setTimeout(() => { removeClosedIndicator.value = true; }, 4600));
+        // Failsafe even if the CSS wheel transition never completes.
+        spinTimers.push(setTimeout(closeWindow, 8500));
+    }, { flush: 'post' });
+
+// Public demo uses one spin lifecycle. Clicking rapidly can shorten a spin,
+// but must never apply a prize twice or start overlapping close timers.
+type DemoSpinPhase = 'idle' | 'spinning' | 'result' | 'applying';
+let demoSpinPhase: DemoSpinPhase = 'idle';
+let demoSkipRequested = false;
+let demoSpinAction: typeof currentUserAction.value = 'farm';
+let demoDoubleDamage = false;
+
+const markDemoEncounterComplete = (): void => {
+    if (!completedEventLevels.value.includes(activeEventLevel.value)) {
+        completedEventLevels.value.push(activeEventLevel.value);
+    }
+    const encounter = fightEvents.value.find(event => event.userLevel === activeEventLevel.value);
+    if (encounter) encounter.rouletteTaken = true;
+};
+
+const addDemoXP = (amount: number, isAttack: boolean): boolean => {
+    const maxLevel = levels.value[levels.value.length - 1];
+    const nextEncounter = nextUnlockedEncounter(
+        fightEvents.value, activeEventLevel.value, maxLevel.levelId
+    );
+    const maxPoints = isAttack
+        ? levels.value.find(level => level.levelId === activeEventLevel.value + 1)?.points
+        : levels.value.find(level => level.levelId === nextEncounter?.userLevel)?.points;
+    const limit = maxPoints ?? maxLevel.points;
+    const wasBelowLimit = user.value.points < limit;
+    user.value.points = Math.min(limit, user.value.points + amount);
+    user.value.level = xpLevelForPoints(levels.value, user.value.points);
+    updateProgressBarPositionIndicator.value = true;
+    return wasBelowLimit && user.value.points >= limit;
+};
+
+const applyDemoResult = (): void => {
+    const result = rouletteGottenValue.value.finalResult;
+    const action = demoSpinAction;
+    let unlockDelay = 350;
+    try {
+        if (action === 'farm' && typeof result === 'number') {
+            creepAnimationIndicator.value = true;
+            myCharacterAction.value = 'attackFarm';
+            addDemoXP(result * (demoDoubleDamage ? 2 : 1), false);
+            demoDoubleDamage = false;
+            unlockDelay = 2900;
+        } else if (action === 'attack' && typeof result === 'number') {
+            const defeated = addDemoXP(result * (demoDoubleDamage ? 2 : 1), true);
+            demoDoubleDamage = false;
+            myCharacterAction.value = 'attack';
+            eventAction.value = 'damage';
+            unlockDelay = defeated ? 2850 : 1850;
+            if (defeated) {
+                markDemoEncounterComplete();
+                spinTimers.push(setTimeout(() => { eventAction.value = 'death'; }, 1150));
+            }
+        } else if (action === 'getFreeSpins' && typeof result === 'number') {
+            // The reward is illustrative: movement is already unlimited in demo mode.
+            markDemoEncounterComplete();
+            myCharacterAction.value = 'idle';
+        } else if (action === 'getRunes' && typeof result === 'string') {
+            if (result === 'RuneDoubleDamage') demoDoubleDamage = true;
+            if (result === 'RuneWater') addDemoXP(200, false);
+            markDemoEncounterComplete();
+            myCharacterAction.value = 'idle';
         }
-        timeout3.value = null;
-    }, 8500);
+        currentUserAction.value = demoAction(
+            fightEvents.value, activeEventLevel.value, user.value.level,
+            completedEventLevels.value
+        );
+    } catch (error) {
+        console.error('Demo spin reward failed', error);
+    } finally {
+        spinTimers.push(setTimeout(() => {
+            demoSpinPhase = 'idle';
+            myCharacterAction.value = 'idle';
+            eventAction.value = 'idle';
+            allowToOpenRoulette.value = true;
+        }, unlockDelay));
+    }
+};
+
+const finishDemoSpin = (): void => {
+    if (demoSpinPhase !== 'result') return;
+    demoSpinPhase = 'applying';
+    isRouletteWindowOpened.value = false;
+    showAwardIndicator.value = false;
+    removeClosedIndicator.value = false;
+    skipScrollIndicator.value = false;
+    // Allow the modal to begin fading before starting the character animation.
+    spinTimers.push(setTimeout(applyDemoResult, 220));
+};
+
+const revealDemoSpin = (): void => {
+    if (demoSpinPhase !== 'spinning') return;
+    demoSpinPhase = 'result';
+    showAwardIndicator.value = true;
+    removeClosedIndicator.value = true;
+    spinTimers.push(setTimeout(finishDemoSpin, 1200));
+};
+
+watch(isRouletteWindowOpened, (opened) => {
+    if (!DEMO_MODE) return;
+    if (!opened) return;
+    clearSpinTimers();
+    demoSpinPhase = 'spinning';
+    demoSkipRequested = false;
+    demoSpinAction = currentUserAction.value;
+    skipScrollIndicator.value = false;
+    showAwardIndicator.value = false;
+    removeClosedIndicator.value = false;
+    spinTimers.push(setTimeout(revealDemoSpin, 4000));
+}, { flush: 'post' });
+
+onUnmounted(() => {
+    if (DEMO_MODE) {
+        allowToOpenRoulette.value = true;
+        isRouletteWindowOpened.value = false;
+    }
+    clearSpinTimers();
+    if (resultUnlockTimer) clearTimeout(resultUnlockTimer);
+    if (resultApplyTimer) clearTimeout(resultApplyTimer);
 });
 
 const openAwardsWindow = (): void => {
@@ -173,8 +283,9 @@ watchEffect(() => {
 })
 
 watch(isRouletteWindowOpened, (newValue) => {
-    if (!newValue) {
+    if (newValue) {
         showAwardIndicator.value = false;
+        removeClosedIndicator.value = false;
     }
 })
 
@@ -196,7 +307,10 @@ const closeWindow = (): void => {
         creepAnimationIndicator.value = true;
     }
     
-    setTimeout(() => {
+    if (resultApplyTimer) clearTimeout(resultApplyTimer);
+    resultApplyTimer = setTimeout(() => {
+        resultApplyTimer = null;
+        try {
         skipScrollIndicator.value = false;
         let currentEvent = fightEvents.value.find(el => {
             return el.userLevel === user.value.level;
@@ -317,7 +431,7 @@ const closeWindow = (): void => {
                 spinsAmount.value += rouletteGottenValue.value.finalResult;
             }
             // user.value.spins += rouletteGottenValue.value.finalResult;
-            currentEvent!.rouletteTaken = true;
+            if (currentEvent) currentEvent.rouletteTaken = true;
         } else if (currentUserAction.value === 'getRunes') {
             if (typeof rouletteGottenValue.value.finalResult !== 'string') return;
             currentUserAction.value = 'farm';
@@ -357,7 +471,7 @@ const closeWindow = (): void => {
             } else if (rouletteGottenValue.value.finalResult === 'RuneDoubleDamage') {
                 ddRuneIndicator.value = true;
             }
-            currentEvent!.rouletteTaken = true;
+            if (currentEvent) currentEvent.rouletteTaken = true;
         }
 
         currentEvent = fightEvents.value.find(el => {
@@ -366,21 +480,48 @@ const closeWindow = (): void => {
         if (!currentEvent && currentUserAction.value !== 'go') {
             currentUserAction.value = 'farm';
         }
-        runeDescription.value = null;
-        rouletteGottenValue.value.finalResult = null;
-        rouletteGottenValue.value.neededSegment = null;
-        rouletteGottenValue.value.neededRotation = null;
-        removeClosedIndicator.value = false;
-        showAwardIndicator.value = false;
-        rouletteStore.getRoullettes();
+        if (!DEMO_MODE) rouletteStore.getRoullettes();
+        } catch (error) {
+            console.error('Unable to complete roulette result', error);
+        } finally {
+            // No failure in the legacy reward/level logic may lock the demo.
+            runeDescription.value = null;
+            rouletteGottenValue.value.finalResult = null;
+            rouletteGottenValue.value.neededSegment = null;
+            rouletteGottenValue.value.neededRotation = null;
+            removeClosedIndicator.value = false;
+            showAwardIndicator.value = false;
+            skipScrollIndicator.value = false;
+            if (DEMO_MODE) {
+                if (resultUnlockTimer) clearTimeout(resultUnlockTimer);
+                resultUnlockTimer = setTimeout(() => {
+                    if (!isRouletteWindowOpened.value) allowToOpenRoulette.value = true;
+                    resultUnlockTimer = null;
+                }, 2200);
+            }
+        }
     }, 200);
 };
 
 const closeWindowOnWrapper = (event: Event): void => {
+    if (!isRouletteWindowOpened.value) return;
+    if (DEMO_MODE) {
+        if (demoSpinPhase === 'spinning' && !demoSkipRequested) {
+            demoSkipRequested = true;
+            clearSpinTimers();
+            skipScrollIndicator.value = true;
+            // The wheel snaps to its selected segment immediately.
+            spinTimers.push(setTimeout(revealDemoSpin, 180));
+        } else if (demoSpinPhase === 'result') {
+            // An additional click may dismiss the result, but never apply twice.
+            clearSpinTimers();
+            finishDemoSpin();
+        }
+        return;
+    }
     if (!winId.value && isRegistered.value) return;
     if (!skipScrollIndicator.value) {
         skipScroll();
-        timeoutCloseWindow.value = null;
         return;
     }
     closeWindow();
@@ -391,7 +532,7 @@ const closeWindowOnWrapper = (event: Event): void => {
     <div @click="closeWindowOnWrapper" :class="{'closed': !isRouletteWindowOpened}" class="roulette-screen">
         <div class="skip-scroll" v-if="!isRegistered || winId">
             <!-- <span>Нажми, чтобы ускорить</span> -->
-            <span>Click to speed up</span>
+            <span>{{ DEMO_MODE && showAwardIndicator ? 'Reward revealed' : 'Click to speed up' }}</span>
             <img src="@/assets/svg/arrow2.svg" alt="" class="arrow">
         </div>
         <div :class="currentUserAction" class="roulette-window">
@@ -470,16 +611,17 @@ const closeWindowOnWrapper = (event: Event): void => {
     }
 
     .roulette-window.getFreeSpins {
+        .gotten-value .title {
+            font-size: 4.8rem;
 
-        .gotten-value {
-
-            .title {
-                font-size: 4.8rem !important;
+            @media only screen and (max-width: 600px) {
+                font-size: 2.4rem;
             }
         }
     }
     
     .gotten-value {
+        max-width: calc(100vw - 2rem);
         position: absolute;
         bottom: 65vh;
         left: 50%;
@@ -488,6 +630,12 @@ const closeWindowOnWrapper = (event: Event): void => {
         height: 10rem;
         transition: all .6s;
         filter: drop-shadow(0px 0px 20px #3B6350);
+
+        @media only screen and (max-width: 600px) {
+            width: 21rem;
+            height: 7.5rem;
+            bottom: 72vh;
+        }
 
         @media only screen and (max-width: 850px) and (max-height: 750px) {
             bottom: 70vh;
@@ -522,12 +670,40 @@ const closeWindowOnWrapper = (event: Event): void => {
         .title {
             font-family: Reaver;
             font-size: 4.5rem;
+
+            @media only screen and (max-width: 600px) {
+                font-size: 2.4rem;
+            }
         }
     }
 
     .gotten-value-rune {
         height: 20rem !important;
         text-align: center;
+
+        @media only screen and (max-width: 600px) {
+            height: 12rem !important;
+            width: 21rem;
+            max-width: calc(100vw - 1rem);
+
+            .inner-container {
+                padding: 0 1.5rem;
+            }
+
+            .rune-image {
+                width: 3rem;
+                margin-bottom: .3rem;
+            }
+
+            .title {
+                font-size: 1.8rem;
+                margin-bottom: .2rem;
+            }
+
+            .description {
+                font-size: 1rem;
+            }
+        }
 
         @media only screen and (min-width: 850px) {
             bottom: 63vh;

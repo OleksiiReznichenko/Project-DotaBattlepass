@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DEMO_MODE } from '@/demo/config';
 import { storeToRefs } from "pinia";
 import { useBaseStore } from '@/stores/index';
 import { useUserStore } from '@/stores/user';
@@ -109,7 +110,7 @@ const closeWindow = (): void => {
         awardsClosedIndicator.value = true;
         setTimeout(() => {
             awardsSectionOpenIndicator.value = false;
-            rouletteStore.getRoullettes();
+            if (!DEMO_MODE) rouletteStore.getRoullettes();
         }, 200);
         // setTimeout(() => {
         //     awardsClosedIndicator.value = false;
